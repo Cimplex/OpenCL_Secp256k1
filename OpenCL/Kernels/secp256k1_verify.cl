@@ -1,6 +1,4 @@
 // Constants
-#define UINT64_MAX 0xFFFFFFFFFFFFFFFF
-
 /* Limbs of half the secp256k1 order. */
 #define SECP256K1_N_H_0 (0xDFE92F46681B20A0UL)
 #define SECP256K1_N_H_1 (0x5D576E7357A4501DUL)
@@ -25,7 +23,53 @@ typedef struct {
 } secp256k1_uint128;
 
 typedef struct {
-    ulong v[5];
+    long hi; // Higher 64 bits
+    ulong lo; // Lower 64 bits
+} secp256k1_int128;
+
+static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
+    secp256k1_int128 sum;
+    secp256k1_int128 carry;
+
+    sum.lo = a->lo + b->lo;
+    carry.lo = (sum.lo < a->lo) || (sum.lo < b->lo);
+
+    sum.hi = a->hi + b->hi + carry.lo;
+    carry.hi = (sum.hi < a->hi) || (sum.hi < b->hi);
+
+    sum.hi += carry.hi;
+
+    *r = sum;
+}
+
+static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
+    ulong lo_a = (ulong)a;
+    ulong hi_a = (a < 0) ? ULONG_MAX : 0UL;
+    ulong lo_b = (ulong)b;
+    ulong hi_b = (b < 0) ? ULONG_MAX : 0UL;
+
+    ulong lo_result = lo_a * lo_b;
+    ulong mid_result = lo_a * hi_b + hi_a * lo_b;
+    ulong hi_result = hi_a * hi_b;
+
+    mid_result += (lo_result >> 32);
+    hi_result += (mid_result >> 32);
+
+    r->lo = (lo_result & 0xFFFFFFFFUL) | ((mid_result & 0xFFFFFFFFUL) << 32);
+    r->hi = hi_result;
+}
+
+static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
+    secp256k1_int128 ab;
+    secp256k1_i128_mul(&ab, a, b);
+
+    secp256k1_int128 temp = *r;
+    secp256k1_i128_add(&temp, &temp, &ab);
+    *r = temp;
+}
+
+typedef struct {
+    long v[5];
 } secp256k1_modinv64_signed62;
 
 typedef struct {
@@ -37,7 +81,7 @@ typedef struct {
 } secp256k1_modinv64_modinfo;
 
 typedef struct {
-    ulong u, v, q, r;
+    long u, v, q, r;
 } secp256k1_modinv64_trans2x2;
 
 typedef struct {
@@ -55,9 +99,6 @@ typedef struct {
     * sum(i=0..4, f.n[i] << (i*52)) may exceed p, unless the field element is
     * normalized. */
     ulong n[5];
-
-	// No verify
-
 } secp256k1_fe;
 
 typedef struct {
@@ -270,35 +311,8 @@ static void secp256k1_scalar_set_b32(secp256k1_scalar *r, const uchar *b32, int 
     }
 }
 
-
-
-// ==========================================================================================================================================
-// This needs a lot of work... i'm not sure the best way to keep a const array in memory
-
-/* Determine the number of trailing zero bits in a (non-zero) 64-bit x.
- * This function is only intended to be used as fallback for
- * secp256k1_ctz64_var, but permits it to be tested separately. */
-__constant static const uchar8 debruijn = (uchar8)(
-    0, 1, 2, 53, 3, 7, 54, 27,
-    4, 38, 41, 8, 34, 55, 48, 28,
-    62, 5, 39, 46, 44, 42, 22, 9,
-    24, 35, 59, 56, 49, 18, 29, 11,
-    63, 52, 6, 26, 37, 40, 33, 47,
-    61, 45, 43, 21, 23, 58, 17, 10,
-    51, 25, 36, 32, 60, 20, 57, 16,
-    50, 31, 19, 15, 30, 14, 13, 12
-);
-
-// TODO: Completely rewritten. Need to really check this function
-static int secp256k1_ctz64_var_debruijn(ulong x) {
-    uchar8 shifted = (uchar8)((x & -x) * 0x022FDD63CC95386DU) >> 58;
-    uint index = shifted.s0 + shifted.s1 + shifted.s2 + shifted.s3 + shifted.s4 + shifted.s5 + shifted.s6 + shifted.s7;
-    return debruijn[index];
-}
-// ==========================================================================================================================================
-
 static void secp256k1_scalar_to_signed62(secp256k1_modinv64_signed62 *r, const secp256k1_scalar *a) {
-    const ulong M62 = UINT64_MAX >> 2;
+    const ulong M62 = ULONG_MAX >> 2;
     const ulong a0 = a->d[0], a1 = a->d[1], a2 = a->d[2], a3 = a->d[3];
 
     r->v[0] =  a0                   & M62;
@@ -308,8 +322,98 @@ static void secp256k1_scalar_to_signed62(secp256k1_modinv64_signed62 *r, const s
     r->v[4] =  a3 >> 56;
 }
 
+/* Compute (t/2^62) * [d, e] mod modulus, where t is a transition matrix scaled by 2^62.
+ *
+ * On input and output, d and e are in range (-2*modulus,modulus). All output limbs will be in range
+ * (-2^62,2^62).
+ *
+ * This implements the update_de function from the explanation.
+ */
+static void secp256k1_modinv64_update_de_62(secp256k1_modinv64_signed62 *d, secp256k1_modinv64_signed62 *e, const secp256k1_modinv64_trans2x2 *t, const secp256k1_modinv64_modinfo* modinfo) {
+    const ulong M62 = ULONG_MAX >> 2;
+    const long d0 = d->v[0], d1 = d->v[1], d2 = d->v[2], d3 = d->v[3], d4 = d->v[4];
+    const long e0 = e->v[0], e1 = e->v[1], e2 = e->v[2], e3 = e->v[3], e4 = e->v[4];
+    const long u = t->u, v = t->v, q = t->q, r = t->r;
+    long md, me, sd, se;
+    secp256k1_int128 cd, ce;
+    /* [md,me] start as zero; plus [u,q] if d is negative; plus [v,r] if e is negative. */
+    sd = d4 >> 63;
+    se = e4 >> 63;
+    md = (u & sd) + (v & se);
+    me = (q & sd) + (r & se);
+    /* Begin computing t*[d,e]. */
+    secp256k1_i128_mul(&cd, u, d0);
+    secp256k1_i128_accum_mul(&cd, v, e0);
+    secp256k1_i128_mul(&ce, q, d0);
+    secp256k1_i128_accum_mul(&ce, r, e0);
+    /* Correct md,me so that t*[d,e]+modulus*[md,me] has 62 zero bottom bits. */
+    md -= (modinfo->modulus_inv62 * secp256k1_i128_to_u64(&cd) + md) & M62;
+    me -= (modinfo->modulus_inv62 * secp256k1_i128_to_u64(&ce) + me) & M62;
+    /* Update the beginning of computation for t*[d,e]+modulus*[md,me] now md,me are known. */
+    secp256k1_i128_accum_mul(&cd, modinfo->modulus.v[0], md);
+    secp256k1_i128_accum_mul(&ce, modinfo->modulus.v[0], me);
+    /* Verify that the low 62 bits of the computation are indeed zero, and then throw them away. */
+    VERIFY_CHECK((secp256k1_i128_to_u64(&cd) & M62) == 0); secp256k1_i128_rshift(&cd, 62);
+    VERIFY_CHECK((secp256k1_i128_to_u64(&ce) & M62) == 0); secp256k1_i128_rshift(&ce, 62);
+    /* Compute limb 1 of t*[d,e]+modulus*[md,me], and store it as output limb 0 (= down shift). */
+    secp256k1_i128_accum_mul(&cd, u, d1);
+    secp256k1_i128_accum_mul(&cd, v, e1);
+    secp256k1_i128_accum_mul(&ce, q, d1);
+    secp256k1_i128_accum_mul(&ce, r, e1);
+    if (modinfo->modulus.v[1]) { /* Optimize for the case where limb of modulus is zero. */
+        secp256k1_i128_accum_mul(&cd, modinfo->modulus.v[1], md);
+        secp256k1_i128_accum_mul(&ce, modinfo->modulus.v[1], me);
+    }
+    d->v[0] = secp256k1_i128_to_u64(&cd) & M62; secp256k1_i128_rshift(&cd, 62);
+    e->v[0] = secp256k1_i128_to_u64(&ce) & M62; secp256k1_i128_rshift(&ce, 62);
+    /* Compute limb 2 of t*[d,e]+modulus*[md,me], and store it as output limb 1. */
+    secp256k1_i128_accum_mul(&cd, u, d2);
+    secp256k1_i128_accum_mul(&cd, v, e2);
+    secp256k1_i128_accum_mul(&ce, q, d2);
+    secp256k1_i128_accum_mul(&ce, r, e2);
+    if (modinfo->modulus.v[2]) { /* Optimize for the case where limb of modulus is zero. */
+        secp256k1_i128_accum_mul(&cd, modinfo->modulus.v[2], md);
+        secp256k1_i128_accum_mul(&ce, modinfo->modulus.v[2], me);
+    }
+    d->v[1] = secp256k1_i128_to_u64(&cd) & M62; secp256k1_i128_rshift(&cd, 62);
+    e->v[1] = secp256k1_i128_to_u64(&ce) & M62; secp256k1_i128_rshift(&ce, 62);
+    /* Compute limb 3 of t*[d,e]+modulus*[md,me], and store it as output limb 2. */
+    secp256k1_i128_accum_mul(&cd, u, d3);
+    secp256k1_i128_accum_mul(&cd, v, e3);
+    secp256k1_i128_accum_mul(&ce, q, d3);
+    secp256k1_i128_accum_mul(&ce, r, e3);
+    if (modinfo->modulus.v[3]) { /* Optimize for the case where limb of modulus is zero. */
+        secp256k1_i128_accum_mul(&cd, modinfo->modulus.v[3], md);
+        secp256k1_i128_accum_mul(&ce, modinfo->modulus.v[3], me);
+    }
+    d->v[2] = secp256k1_i128_to_u64(&cd) & M62; secp256k1_i128_rshift(&cd, 62);
+    e->v[2] = secp256k1_i128_to_u64(&ce) & M62; secp256k1_i128_rshift(&ce, 62);
+    /* Compute limb 4 of t*[d,e]+modulus*[md,me], and store it as output limb 3. */
+    secp256k1_i128_accum_mul(&cd, u, d4);
+    secp256k1_i128_accum_mul(&cd, v, e4);
+    secp256k1_i128_accum_mul(&ce, q, d4);
+    secp256k1_i128_accum_mul(&ce, r, e4);
+    secp256k1_i128_accum_mul(&cd, modinfo->modulus.v[4], md);
+    secp256k1_i128_accum_mul(&ce, modinfo->modulus.v[4], me);
+    d->v[3] = secp256k1_i128_to_u64(&cd) & M62; secp256k1_i128_rshift(&cd, 62);
+    e->v[3] = secp256k1_i128_to_u64(&ce) & M62; secp256k1_i128_rshift(&ce, 62);
+    /* What remains is limb 5 of t*[d,e]+modulus*[md,me]; store it as output limb 4. */
+    d->v[4] = secp256k1_i128_to_i64(&cd);
+    e->v[4] = secp256k1_i128_to_i64(&ce);
+}
 
-// NEEDS WORK
+/* Determine the number of trailing zero bits in a (non-zero) 64-bit x.
+ * This function is only intended to be used as fallback for
+ * secp256k1_ctz64_var, but permits it to be tested separately. */
+static int secp256k1_ctz64_var_debruijn(ulong x) {
+    const uchar debruijn[64] = {
+        0, 1, 2, 53, 3, 7, 54, 27, 4, 38, 41, 8, 34, 55, 48, 28,
+        62, 5, 39, 46, 44, 42, 22, 9, 24, 35, 59, 56, 49, 18, 29, 11,
+        63, 52, 6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
+        51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12
+    };
+    return debruijn[(ulong)((x & -x) * 0x022FDD63CC95386DU) >> 58];
+}
 
 /* Compute the transition matrix and eta for 62 divsteps (variable time, eta=-delta).
  *
@@ -321,7 +425,7 @@ static void secp256k1_scalar_to_signed62(secp256k1_modinv64_signed62 *r, const s
  *
  * Implements the divsteps_n_matrix_var function from the explanation.
  */
-static ulong secp256k1_modinv64_divsteps_62_var(ulong eta, ulong f0, ulong g0, secp256k1_modinv64_trans2x2 *t) {
+static ulong secp256k1_modinv64_divsteps_62_var(long eta, ulong f0, ulong g0, secp256k1_modinv64_trans2x2 *t) {
     /* Transformation matrix; see comments in secp256k1_modinv64_divsteps_62. */
     ulong u = 1, v = 0, q = 0, r = 1;
     ulong f = f0, g = g0, m;
@@ -330,7 +434,7 @@ static ulong secp256k1_modinv64_divsteps_62_var(ulong eta, ulong f0, ulong g0, s
 
     for (;;) {
         /* Use a sentinel bit to count zeros only up to i. */
-        zeros = secp256k1_ctz64_var_debruijn(g | (UINT64_MAX << i));
+        zeros = secp256k1_ctz64_var_debruijn(g | (ULONG_MAX << i));
         /* Perform zeros divsteps at once; they all just divide g by two. */
         g >>= zeros;
         u <<= zeros;
@@ -352,7 +456,7 @@ static ulong secp256k1_modinv64_divsteps_62_var(ulong eta, ulong f0, ulong g0, s
              * sign will flip again once that happens. */
             limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
             /* m is a mask for the bottom min(limit, 6) bits. */
-            m = (UINT64_MAX >> (64 - limit)) & 63U;
+            m = (ULONG_MAX >> (64 - limit)) & 63U;
             /* Find what multiple of f must be added to g to cancel its bottom min(limit, 6)
              * bits. */
             w = (f * g * (f * f - 2)) & m;
@@ -361,7 +465,7 @@ static ulong secp256k1_modinv64_divsteps_62_var(ulong eta, ulong f0, ulong g0, s
              * eta tends to be smaller here. */
             limit = ((int)eta + 1) > i ? i : ((int)eta + 1);
             /* m is a mask for the bottom min(limit, 4) bits. */
-            m = (UINT64_MAX >> (64 - limit)) & 15U;
+            m = (ULONG_MAX >> (64 - limit)) & 15U;
             /* Find what multiple of f must be added to g to cancel its bottom min(limit, 4)
              * bits. */
             w = f + (((f + 1) & 4) << 1);
@@ -372,10 +476,10 @@ static ulong secp256k1_modinv64_divsteps_62_var(ulong eta, ulong f0, ulong g0, s
         r += v * w;
     }
     /* Return data in t and return value. */
-    t->u = (ulong)u;
-    t->v = (ulong)v;
-    t->q = (ulong)q;
-    t->r = (ulong)r;
+    t->u = (long)u;
+    t->v = (long)v;
+    t->q = (long)q;
+    t->r = (long)r;
 
     return eta;
 }
@@ -422,8 +526,8 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, const secp256
         cond |= gn ^ (gn >> 63);
         /* If so, reduce length, propagating the sign of f and g's top limb into the one below. */
         if (cond == 0) {
-            f.v[len - 2] |= (uint64_t)fn << 62;
-            g.v[len - 2] |= (uint64_t)gn << 62;
+            f.v[len - 2] |= (ulong)fn << 62;
+            g.v[len - 2] |= (ulong)gn << 62;
             --len;
         }
 #ifdef VERIFY

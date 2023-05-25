@@ -12,7 +12,7 @@ public abstract class KernelBase
 
 	public abstract (string name, string path)[] KernelPaths { get; }
 
-	protected abstract KernelLibrary KernelLibrary { get; set; }
+	protected abstract KernelLibrary KernelLibrary { get; init; }
 
 	protected KernelLibrary CreateKernelLibrary()
 	{

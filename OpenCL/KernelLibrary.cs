@@ -38,6 +38,10 @@ namespace OpenCL_Secp256k1.OpenCL
 
             (char[] source, uint length) = GetSourceFromName(kernelName);
 
+			Console.WriteLine($"Creating kernel '{kernelName}'");
+			Console.WriteLine($"Source length: {length}");
+			Console.WriteLine($"Source: {new string(source)}");
+
             // TODO: Can we get rid of these allocations?
             byte[] bytes = Array.ConvertAll<char, byte>(source, c => (byte)c);
 
@@ -58,7 +62,7 @@ namespace OpenCL_Secp256k1.OpenCL
                         errcode_ret: out int errorCode);
 
                     if ((ErrorCodes)errorCode != ErrorCodes.Success)
-                        throw new Exception("Could not create program from source");
+                        throw new Exception($"Could not create program from source. OpenCL Error: {(ErrorCodes)errorCode}");
                 }
             }
 

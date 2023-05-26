@@ -2,22 +2,20 @@
 using System.Runtime.InteropServices;
 using OpenCL_Secp256k1.OpenCL;
 using OpenCL_Secp256k1.OpenCL.Kernels;
+using Silk.NET.OpenCL;
 
 // Welcome to programming with OpenCL, lets keep it simple
 
 // Setup OpenCL context, first we select the platform (NVidia, AMD, Intel, Apple, etc.)
-Platform? platform = Platform.GetPlatform("*Apple*");
+Platform? platform = Platform.GetPlatform("*Apple*", DeviceTypes.Gpu);
 
 if (platform is null)
 	throw new Exception($"No OpenCL Platform found. Valid choices: {string.Join(", ", Platform.GetPlatforms().Select(p => p.Vendor))}");
 
-// Filter all devices on the platform
-platform.DeviceType = DeviceTypes.Gpu;
-
 // Didn't get an GPU's check if we have other devices
 if (platform.Devices.Length == 0)
 {
-	platform.DeviceType = DeviceTypes.All;
+	//platform.DeviceType = DeviceTypes.All;
 
 	// Just throw an error, technically we could switch to a different type, but lets keep it simple
 	if (platform.Devices.Length == 0)
@@ -29,23 +27,30 @@ if (platform.Devices.Length == 0)
 // Just get the first device (technically, we could use multiple devices, but lets keep it simple)
 Device device = platform.Devices[0];
 
+// Create our opencl context
+nint context = OpenCLSharp.CreateContext(device);
+
+int devices = Utilities.GetContextInfo_Int32(context, ContextInfo.NumDevices);
+
 Console.WriteLine("=========================================================");
 Console.WriteLine("Platform Vendor: " + platform.Vendor);
 Console.WriteLine("Device Name: " + device.Name);
 Console.WriteLine("Device Type: " + device.DeviceType);
 Console.WriteLine("Device Global Memory: " + device.GlobalMemory / 1024 / 1024 + "MB");
 Console.WriteLine("Computer Units: " + device.WorkGroupSize + " units");
+Console.WriteLine("Context Devices: " + devices + " device" + (devices == 1 ? "" : "s"));
 Console.WriteLine("=========================================================\n\n");
 
 
-// Create our opencl context
-nint context = OpenCLSharp.CreateContext(device);
+
+
+
 
 // Create our opencl command queue
 nint command_queue = OpenCLSharp.CreateCommandQueue(context, device);
 
 // Create our kernel (the actual opencl kernel in contained in this KernelBase class)
-Secp256k1_Verify kernel = new Secp256k1_Verify(context, device, command_queue);
+Secp256k1_Verify kernel = new Secp256k1_Verify(device: device, context: context, command_queue: command_queue);
 
 long BUFFER_SIZE = 16;
 
@@ -53,10 +58,12 @@ long BUFFER_SIZE = 16;
 
 byte[] _input = new byte[BUFFER_SIZE];
 GCHandle hInput = GCHandle.Alloc(_input, GCHandleType.Pinned);
+//IntPtr input = Marshal.UnsafeAddrOfPinnedArrayElement(_input, 0);
 nint input = hInput.AddrOfPinnedObject();
 
 byte[] _output = new byte[BUFFER_SIZE];
 GCHandle hOutput = GCHandle.Alloc(_output, GCHandleType.Pinned);
+//IntPtr output = Marshal.UnsafeAddrOfPinnedArrayElement(_output, 0);
 nint output = hOutput.AddrOfPinnedObject();
 
 // Setup some test data

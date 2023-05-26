@@ -106,6 +106,8 @@ public class Platform
 
         __devices = new Device[numDevices];
 
+		Open.CL.RetainDevice(devices[0]);
+
         for (int i = 0; i < numDevices; i += 1)
         {
             __devices[i] = new Device(devices[i]);

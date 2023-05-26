@@ -10,41 +10,25 @@ public class Kernel : IDisposable
 
 	private bool disposedValue;
 
-	private IntPtr command_queue;
+	private IntPtr kernel;
 
 	private IntPtr program;
 
-	private IntPtr kernel;
+	private IntPtr command_queue;
 
 	private uint index = 0;
 
-	public Kernel(IntPtr command_queue, IntPtr program, IntPtr kernel)
+	public Kernel(IntPtr kernel, IntPtr program, IntPtr command_queue)
 	{
-		this.command_queue = command_queue;
-		this.program = program;
 		this.kernel = kernel;
+		this.program = program;
+		this.command_queue = command_queue;
 	}
 
-	public unsafe void SetArg(nint value, uint size)
-	{
-		//                                  increment index --v
-		if ((ErrorCodes)Open.CL.SetKernelArg(kernel, index++, size, value.ToPointer()) != ErrorCodes.Success)
-			throw new Exception($"Error setting kernel arg (index: {--index})");
-	}
-
-	public unsafe void SetArg<T0>(T0 value, uint size) where T0 : unmanaged
-	{
-		ReadOnlySpan<T0> value_span = new ReadOnlySpan<T0>(in value);
-
-		//                                      increment index --v
-		if ((ErrorCodes)Open.CL.SetKernelArg<T0>(kernel, index++, size, value_span) != ErrorCodes.Success)
-			throw new Exception($"Error setting kernel arg (index: {--index})");
-	}
-
-	public void SetArgSpan<T0>(Span<T0> value, uint size) where T0 : unmanaged
+	public unsafe void SetArg<T0>(T0 value) where T0 : unmanaged
 	{
 		//                                      increment index --v
-		if ((ErrorCodes)Open.CL.SetKernelArg<T0>(kernel, index++, size, value) != ErrorCodes.Success)
+		if ((ErrorCodes)Open.CL.SetKernelArg<T0>(kernel, index++, (nuint)sizeof(T0), in value) != ErrorCodes.Success)
 			throw new Exception($"Error setting kernel arg (index: {--index})");
 	}
 

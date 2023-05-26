@@ -1,10 +1,16 @@
 using System;
+using System.Runtime.InteropServices;
 using Silk.NET.OpenCL;
 
 namespace OpenCL_Secp256k1.OpenCL
 {
     public class KernelLibrary
     {
+		private struct CallbackUserData
+		{
+			public IntPtr device;
+		}
+
         public string[] Names { get; private set; } = Array.Empty<string>();
 
         public uint[] Lengths { get; private set; } = Array.Empty<uint>();
@@ -38,10 +44,6 @@ namespace OpenCL_Secp256k1.OpenCL
 
             (char[] source, uint length) = GetSourceFromName(kernelName);
 
-			Console.WriteLine($"Creating kernel '{kernelName}'");
-			Console.WriteLine($"Source length: {length}");
-			Console.WriteLine($"Source: {new string(source)}");
-
             // TODO: Can we get rid of these allocations?
             byte[] bytes = Array.ConvertAll<char, byte>(source, c => (byte)c);
 
@@ -62,16 +64,22 @@ namespace OpenCL_Secp256k1.OpenCL
                         errcode_ret: out int errorCode);
 
                     if ((ErrorCodes)errorCode != ErrorCodes.Success)
-                        throw new Exception($"Could not create program from source. OpenCL Error: {(ErrorCodes)errorCode}");
+						throw new Exception($"Could not create program from source. OpenCL Error: {(ErrorCodes)errorCode}");
                 }
             }
 
-            ReadOnlySpan<nint> devices = new ReadOnlySpan<nint>(device);
+			CallbackUserData e = new CallbackUserData { device = device };
+			IntPtr userData = Marshal.AllocHGlobal(Marshal.SizeOf(e));
+			Marshal.StructureToPtr(e, userData, false);
 
-            int error = Open.CL.BuildProgram(program, 1u, devices, string.Empty, null, null);
+            ReadOnlySpan<nint> devices = new ReadOnlySpan<nint>(device);
+            int error = Open.CL.BuildProgram(program, 1u, devices, string.Empty, MyObjectNotifyCallback, userData.ToPointer());
+			Marshal.FreeHGlobal(userData);
 
             if ((ErrorCodes)error != ErrorCodes.Success)
                 throw new Exception($"Could not build program: {(ErrorCodes)error}");
+
+			error = 100;
 
             Span<int> errorSpan = new Span<int>(ref error);
             kernel = Open.CL.CreateKernel(program, kernelName, errorSpan);
@@ -79,8 +87,30 @@ namespace OpenCL_Secp256k1.OpenCL
             if ((ErrorCodes)error != ErrorCodes.Success)
                 throw new Exception($"Could not create kernel: {(ErrorCodes)error}");
 
-            return new Kernel(command_queue, program, kernel);
+            return new Kernel(command_queue: command_queue, program: program, kernel: kernel);
         }
+
+		public unsafe void MyObjectNotifyCallback(nint program, void* userData)
+		{
+			IntPtr userDataIntPtr = new IntPtr(userData);
+			CallbackUserData myStructInstance = Marshal.PtrToStructure<CallbackUserData>(userDataIntPtr);
+
+			// Retrieve the build status
+			int buildStatus = Utilities.GetProgramBuildInfo_Int32(program, myStructInstance.device, ProgramBuildInfo.BuildStatus);
+			if (buildStatus == (int)BuildStatus.Success)
+			{
+				Console.WriteLine("Program build successful!");
+			}
+			else
+			{
+				Console.WriteLine("Program build failed!");
+			}
+
+			// Retrieve the build log
+			string buildLog = Utilities.GetProgramBuildInfo_String(program, myStructInstance.device, ProgramBuildInfo.BuildLog);
+			Console.WriteLine("Build Log:");
+			Console.WriteLine(buildLog);
+		}
     }
 }
 

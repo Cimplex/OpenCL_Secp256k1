@@ -14,7 +14,7 @@ public class Secp256k1_Verify : KernelBase, IDisposable
 
 	protected override KernelLibrary KernelLibrary { get; init; }
 
-	public Secp256k1_Verify(nint command_queue, nint device, nint context)
+	public Secp256k1_Verify(nint device, nint context, nint command_queue)
 	{
 		// This is a helper class that lets us load kernels from our resources
 		KernelLibrary = CreateKernelLibrary();
@@ -31,8 +31,8 @@ public class Secp256k1_Verify : KernelBase, IDisposable
 		if (_kernel is null)
 			throw new Exception("Create the kernel before running");
 
-		_kernel.SetArg(input, (uint)IntPtr.Size);
-		_kernel.SetArg(output, (uint)IntPtr.Size);
+		_kernel.SetArg(input);
+		_kernel.SetArg(output);
 
 		GlobalWorkSize[0] = (nuint)length;
 

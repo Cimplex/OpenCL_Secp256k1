@@ -25,11 +25,17 @@ public class Kernel : IDisposable
 		this.command_queue = command_queue;
 	}
 
-	public unsafe void SetArg<T0>(T0 value) where T0 : unmanaged
+	public unsafe void SetArg(nint value)
 	{
-		//                                      increment index --v
-		if ((ErrorCodes)Open.CL.SetKernelArg<T0>(kernel, index++, (nuint)sizeof(T0), in value) != ErrorCodes.Success)
-			throw new Exception($"Error setting kernel arg (index: {--index})");
+		Open.CL.GetKernelArgInfo(kernel, index, KernelArgInfo.Name, 0, null, out nuint size);
+
+		nuint actualSize = (nuint)sizeof(nint);
+
+		//                         increment index --v
+		if ((ErrorCodes)Open.CL.SetKernelArg(kernel, index, actualSize, value) != ErrorCodes.Success)
+			throw new Exception($"Error setting kernel arg (index: {index})");
+
+		++index;
 	}
 
 	public nint Run(uint dimensions, nuint[] globalWorkSizes, nuint[] localWorkSizes, nint[] waitEvents)

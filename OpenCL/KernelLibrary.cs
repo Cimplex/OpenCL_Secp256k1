@@ -87,7 +87,7 @@ namespace OpenCL_Secp256k1.OpenCL
             if ((ErrorCodes)error != ErrorCodes.Success)
                 throw new Exception($"Could not create kernel: {(ErrorCodes)error}");
 
-            return new Kernel(command_queue: command_queue, program: program, kernel: kernel);
+            return new Kernel(kernel: kernel, program: program, command_queue: command_queue);
         }
 
 		public unsafe void MyObjectNotifyCallback(nint program, void* userData)

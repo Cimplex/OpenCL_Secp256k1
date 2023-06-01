@@ -41,5 +41,15 @@ public static class OpenCLSharp
 		return CommandQueue;
 	}
 
-	
+	public static void WaitForEvent(ref nint WaitEvent)
+	{
+		int error = 0;
+		ReadOnlySpan<nint> wait_events_span = new Span<nint>(ref WaitEvent);
+
+
+		error = (int)Open.CL.WaitForEvents(1u, wait_events_span);
+
+		if ((ErrorCodes)error != ErrorCodes.Success)
+			throw new Exception($"Cannot wait for event. OpenCL Error: {(ErrorCodes)error}");
+	}
 }

@@ -1,38 +1,54 @@
 typedef struct {
+    ulong hi; // Higher 64 bits
+    ulong lo; // Lower 64 bits
+} secp256k1_uint128;
+
+typedef struct {
     long hi; // Higher 64 bits
     ulong lo; // Lower 64 bits
 } secp256k1_int128;
 
+static void secp256k1_u128_add(secp256k1_uint128 *r, const secp256k1_uint128 *a, const secp256k1_uint128 *b) {
+    uchar carry;
+
+    r->lo = a->lo + b->lo;
+    carry = (r->lo < a->lo) || (r->lo < b->lo);
+
+    r->hi = a->hi + b->hi + carry;
+}
+
+static void secp256k1_u128_mul(secp256k1_uint128 *r, ulong a, ulong b) {
+    ulong lowPart = (ulong)a * (ulong)b;
+	ulong highPart = mul_hi(a, b);
+
+	r->lo = lowPart;
+	r->hi = highPart;
+}
+
+static void secp256k1_u128_accum_mul(secp256k1_uint128 *r, ulong a, ulong b) {
+    secp256k1_uint128 ab;
+    secp256k1_u128_mul(&ab, a, b);
+
+    secp256k1_uint128 temp = *r;
+    secp256k1_u128_add(&temp, &temp, &ab);
+    *r = temp;
+}
+
 static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
-    secp256k1_int128 sum;
-    secp256k1_int128 carry;
+    uchar carry;
 
-    sum.lo = a->lo + b->lo;
-    carry.lo = (sum.lo < a->lo) || (sum.lo < b->lo);
+    r->lo = a->lo + b->lo;
+    carry = (r->lo < a->lo) || (r->lo < b->lo);
 
-    sum.hi = a->hi + b->hi + carry.lo;
-    carry.hi = (sum.hi < a->hi) || (sum.hi < b->hi);
-
-    sum.hi += carry.hi;
-
-    *r = sum;
+    r->hi = a->hi + b->hi + carry;
 }
 
 static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
-    ulong lo_a = (ulong)a;
-    ulong hi_a = (a < 0) ? ULONG_MAX : 0UL;
-    ulong lo_b = (ulong)b;
-    ulong hi_b = (b < 0) ? ULONG_MAX : 0UL;
+    ulong lowPart = (ulong)a * (ulong)b;
+	long highPart = mul_hi(a, b);
 
-    ulong lo_result = lo_a * lo_b;
-    ulong hi_result = mul_hi(lo_a, lo_b);
-
-    ulong mid_result = lo_a * hi_b + hi_a * lo_b;
-    mid_result += (lo_result >> 32);
-    hi_result += (mid_result >> 32) + ((lo_result >> 32) >> 32);
-
-    r->lo = (lo_result & 0xFFFFFFFFUL) | ((mid_result & 0xFFFFFFFFUL) << 32UL);
-    r->hi = hi_result;
+	r->lo = lowPart;
+	r->hi = highPart;
 }
 
 static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
@@ -101,29 +117,14 @@ __kernel void secp256k1_int128_test_mul(__global uchar* input, __global uchar* o
 	// multiply the longs
 	secp256k1_i128_mul(&r, a, b);
 
-	write_long_bytes(output, r.lo, i);
-	write_long_bytes(output, r.hi, i + 8);
+	secp256k1_int128 r2;
+	r2.hi = r.hi;
+	r2.lo = r.lo;
+
+	secp256k1_i128_add(&r, &r, &r2);
+
+	secp256k1_i128_accum_mul(&r, 4, 4);
 
 	// store the result (16 bytes at a time)
-	//load_bytes_from_int126(&r, output, i);
-
-	/*
-	// Read 16 bytes from input and store them into output
-	output[i] = input[i];
-	output[i + 1] = input[i + 1];
-	output[i + 2] = input[i + 2];
-	output[i + 3] = input[i + 3];
-	output[i + 4] = input[i + 4];
-	output[i + 5] = input[i + 5];
-	output[i + 6] = input[i + 6];
-	output[i + 7] = input[i + 7];
-	output[i + 8] = input[i + 8];
-	output[i + 9] = input[i + 9];
-	output[i + 10] = input[i + 10];
-	output[i + 11] = input[i + 11];
-	output[i + 12] = input[i + 12];
-	output[i + 13] = input[i + 13];
-	output[i + 14] = input[i + 14];
-	output[i + 15] = input[i + 15];
-	*/
+	load_bytes_from_int126(&r, output, i);
 }

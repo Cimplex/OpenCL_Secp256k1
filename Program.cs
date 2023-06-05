@@ -74,7 +74,8 @@ input.Write(command_queue, _input);
 // Verify with BitInteger
 BigInteger bigA = new BigInteger(a);
 BigInteger bigB = new BigInteger(b);
-BigInteger bigResult = bigA * bigB;
+BigInteger big16 = new BigInteger(16);
+BigInteger bigResult = (bigA * bigB) + (bigA * bigB) + big16;
 
 // Do the calculation in OpenCL
 nint waitEvent = kernel.Run(input, output, 1);

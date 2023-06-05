@@ -27,6 +27,7 @@ typedef struct {
     ulong lo; // Lower 64 bits
 } secp256k1_int128;
 
+// tested
 static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
     secp256k1_int128 sum;
     secp256k1_int128 carry;
@@ -42,23 +43,16 @@ static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, c
     *r = sum;
 }
 
+// tested
 static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
-    ulong lo_a = (ulong)a;
-    ulong hi_a = (a < 0) ? ULONG_MAX : 0UL;
-    ulong lo_b = (ulong)b;
-    ulong hi_b = (b < 0) ? ULONG_MAX : 0UL;
+    ulong lowPart = (ulong)a * (ulong)b;
+	long highPart = mul_hi(a, b);
 
-    ulong lo_result = lo_a * lo_b;
-    ulong mid_result = lo_a * hi_b + hi_a * lo_b;
-    ulong hi_result = hi_a * hi_b;
-
-    mid_result += (lo_result >> 32);
-    hi_result += (mid_result >> 32);
-
-    r->lo = (lo_result & 0xFFFFFFFFUL) | ((mid_result & 0xFFFFFFFFUL) << 32);
-    r->hi = hi_result;
+	r->lo = lowPart;
+	r->hi = highPart;
 }
 
+// tested
 static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
     secp256k1_int128 ab;
     secp256k1_i128_mul(&ab, a, b);
@@ -521,7 +515,7 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, const secp256
         /* Determine if len>1 and limb (len-1) of both f and g is 0 or -1. */
         fn = f.v[len - 1];
         gn = g.v[len - 1];
-        cond = ((int64_t)len - 2) >> 63;
+        cond = ((long)len - 2) >> 63;
         cond |= fn ^ (fn >> 63);
         cond |= gn ^ (gn >> 63);
         /* If so, reduce length, propagating the sign of f and g's top limb into the one below. */

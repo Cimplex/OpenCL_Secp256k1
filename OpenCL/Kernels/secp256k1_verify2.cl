@@ -28,6 +28,21 @@ static int secp256k1_ctz64_var_debruijn(ulong x) {
     return debruijn[(ulong)((x & -x) * 0x022FDD63CC95386DUL) >> 58];
 }
 
+/** The number of entries a table with precomputed multiples needs to have. */
+static long ECMULT_TABLE_SIZE(int w) {
+	return (1L << ((w)-2));
+}
+
+/** Larger values for ECMULT_WINDOW_SIZE result in possibly better
+ *  performance at the cost of an exponentially larger precomputed
+ *  table. The exact table size is
+ *      (1 << (WINDOW_G - 2)) * sizeof(secp256k1_ge_storage)  bytes,
+ *  where sizeof(secp256k1_ge_storage) is typically 64 bytes but can
+ *  be larger due to platform-specific padding and alignment.
+ *  Two tables of this size are used (due to the endomorphism
+ *  optimization).                                                    */
+#define WINDOW_A 5
+
 /* int128 and uint128 implementation */
 typedef struct { ulong hi; ulong lo; } secp256k1_uint128;
 typedef struct { long hi; ulong lo; } secp256k1_int128;
@@ -424,6 +439,10 @@ typedef struct {
     secp256k1_fe_storage x;
     secp256k1_fe_storage y;
 } secp256k1_ge_storage;
+static void secp256k1_fe_set_int(secp256k1_fe *r, int a) {
+    r->n[0] = a;
+    r->n[1] = r->n[2] = r->n[3] = r->n[4] = 0;
+}
 static void secp256k1_fe_set_b32_mod(secp256k1_fe *r, const unsigned char *a) {
     r->n[0] = (ulong)a[31]
             | ((ulong)a[30] << 8)
@@ -476,6 +495,12 @@ static void secp256k1_ge_from_storage(secp256k1_ge *r, const secp256k1_ge_storag
     secp256k1_fe_from_storage(&r->x, &a->x);
     secp256k1_fe_from_storage(&r->y, &a->y);
     r->infinity = 0;
+}
+static void secp256k1_gej_set_ge(secp256k1_gej *r, const secp256k1_ge *a) {
+   r->infinity = a->infinity;
+   r->x = a->x;
+   r->y = a->y;
+   secp256k1_fe_set_int(&r->z, 1);
 }
 
 /** Mathmatical functions for secp256k1_scalar_mul_512 and secp256k1_scalar_reduce_512. */
@@ -784,6 +809,142 @@ static int secp256k1_pubkey_load(secp256k1_ge* ge, const secp256k1_pubkey* pubke
         secp256k1_ge_set_xy(ge, &x, &y);
     }
     return 1;
+}
+
+struct secp256k1_strauss_point_state {
+    int wnaf_na_1[129];
+    int wnaf_na_lam[129];
+    int bits_na_1;
+    int bits_na_lam;
+};
+struct secp256k1_strauss_state {
+    /* aux is used to hold z-ratios, and then used to hold pre_a[i].x * BETA values. */
+    secp256k1_fe* aux;
+    secp256k1_ge* pre_a;
+    struct secp256k1_strauss_point_state* ps;
+};
+
+// ... continue
+
+static void secp256k1_ecmult_strauss_wnaf(const struct secp256k1_strauss_state *state, secp256k1_gej *r, size_t num, const secp256k1_gej *a, const secp256k1_scalar *na, const secp256k1_scalar *ng) {
+    secp256k1_ge tmpa;
+    secp256k1_fe Z;
+    /* Split G factors. */
+    secp256k1_scalar ng_1, ng_128;
+    int wnaf_ng_1[129];
+    int bits_ng_1 = 0;
+    int wnaf_ng_128[129];
+    int bits_ng_128 = 0;
+    int i;
+    int bits = 0;
+    size_t np;
+    size_t no = 0;
+
+    secp256k1_fe_set_int(&Z, 1);
+    for (np = 0; np < num; ++np) {
+        secp256k1_gej tmp;
+        secp256k1_scalar na_1, na_lam;
+        if (secp256k1_scalar_is_zero(&na[np]) || secp256k1_gej_is_infinity(&a[np])) {
+            continue;
+        }
+        /* split na into na_1 and na_lam (where na = na_1 + na_lam*lambda, and na_1 and na_lam are ~128 bit) */
+        secp256k1_scalar_split_lambda(&na_1, &na_lam, &na[np]);
+
+        /* build wnaf representation for na_1 and na_lam. */
+        state->ps[no].bits_na_1   = secp256k1_ecmult_wnaf(state->ps[no].wnaf_na_1,   129, &na_1,   WINDOW_A);
+        state->ps[no].bits_na_lam = secp256k1_ecmult_wnaf(state->ps[no].wnaf_na_lam, 129, &na_lam, WINDOW_A);
+        VERIFY_CHECK(state->ps[no].bits_na_1 <= 129);
+        VERIFY_CHECK(state->ps[no].bits_na_lam <= 129);
+        if (state->ps[no].bits_na_1 > bits) {
+            bits = state->ps[no].bits_na_1;
+        }
+        if (state->ps[no].bits_na_lam > bits) {
+            bits = state->ps[no].bits_na_lam;
+        }
+
+        /* Calculate odd multiples of a.
+         * All multiples are brought to the same Z 'denominator', which is stored
+         * in Z. Due to secp256k1' isomorphism we can do all operations pretending
+         * that the Z coordinate was 1, use affine addition formulae, and correct
+         * the Z coordinate of the result once at the end.
+         * The exception is the precomputed G table points, which are actually
+         * affine. Compared to the base used for other points, they have a Z ratio
+         * of 1/Z, so we can use secp256k1_gej_add_zinv_var, which uses the same
+         * isomorphism to efficiently add with a known Z inverse.
+         */
+        tmp = a[np];
+        if (no) {
+            secp256k1_gej_rescale(&tmp, &Z);
+        }
+        secp256k1_ecmult_odd_multiples_table(ECMULT_TABLE_SIZE(WINDOW_A), state->pre_a + no * ECMULT_TABLE_SIZE(WINDOW_A), state->aux + no * ECMULT_TABLE_SIZE(WINDOW_A), &Z, &tmp);
+        if (no) secp256k1_fe_mul(state->aux + no * ECMULT_TABLE_SIZE(WINDOW_A), state->aux + no * ECMULT_TABLE_SIZE(WINDOW_A), &(a[np].z));
+
+        ++no;
+    }
+
+    /* Bring them to the same Z denominator. */
+    secp256k1_ge_table_set_globalz(ECMULT_TABLE_SIZE(WINDOW_A) * no, state->pre_a, state->aux);
+
+    for (np = 0; np < no; ++np) {
+        for (i = 0; i < ECMULT_TABLE_SIZE(WINDOW_A); i++) {
+            secp256k1_fe_mul(&state->aux[np * ECMULT_TABLE_SIZE(WINDOW_A) + i], &state->pre_a[np * ECMULT_TABLE_SIZE(WINDOW_A) + i].x, &secp256k1_const_beta);
+        }
+    }
+
+    if (ng) {
+        /* split ng into ng_1 and ng_128 (where gn = gn_1 + gn_128*2^128, and gn_1 and gn_128 are ~128 bit) */
+        secp256k1_scalar_split_128(&ng_1, &ng_128, ng);
+
+        /* Build wnaf representation for ng_1 and ng_128 */
+        bits_ng_1   = secp256k1_ecmult_wnaf(wnaf_ng_1,   129, &ng_1,   WINDOW_G);
+        bits_ng_128 = secp256k1_ecmult_wnaf(wnaf_ng_128, 129, &ng_128, WINDOW_G);
+        if (bits_ng_1 > bits) {
+            bits = bits_ng_1;
+        }
+        if (bits_ng_128 > bits) {
+            bits = bits_ng_128;
+        }
+    }
+
+    secp256k1_gej_set_infinity(r);
+
+    for (i = bits - 1; i >= 0; i--) {
+        int n;
+        secp256k1_gej_double_var(r, r, NULL);
+        for (np = 0; np < no; ++np) {
+            if (i < state->ps[np].bits_na_1 && (n = state->ps[np].wnaf_na_1[i])) {
+                secp256k1_ecmult_table_get_ge(&tmpa, state->pre_a + np * ECMULT_TABLE_SIZE(WINDOW_A), n, WINDOW_A);
+                secp256k1_gej_add_ge_var(r, r, &tmpa, NULL);
+            }
+            if (i < state->ps[np].bits_na_lam && (n = state->ps[np].wnaf_na_lam[i])) {
+                secp256k1_ecmult_table_get_ge_lambda(&tmpa, state->pre_a + np * ECMULT_TABLE_SIZE(WINDOW_A), state->aux + np * ECMULT_TABLE_SIZE(WINDOW_A), n, WINDOW_A);
+                secp256k1_gej_add_ge_var(r, r, &tmpa, NULL);
+            }
+        }
+        if (i < bits_ng_1 && (n = wnaf_ng_1[i])) {
+            secp256k1_ecmult_table_get_ge_storage(&tmpa, secp256k1_pre_g, n, WINDOW_G);
+            secp256k1_gej_add_zinv_var(r, r, &tmpa, &Z);
+        }
+        if (i < bits_ng_128 && (n = wnaf_ng_128[i])) {
+            secp256k1_ecmult_table_get_ge_storage(&tmpa, secp256k1_pre_g_128, n, WINDOW_G);
+            secp256k1_gej_add_zinv_var(r, r, &tmpa, &Z);
+        }
+    }
+
+    if (!r->infinity) {
+        secp256k1_fe_mul(&r->z, &r->z, &Z);
+    }
+}
+static void secp256k1_ecmult(secp256k1_gej *r, const secp256k1_gej *a, const secp256k1_scalar *na, const secp256k1_scalar *ng) {
+    secp256k1_fe aux[ECMULT_TABLE_SIZE(WINDOW_A)];
+    secp256k1_ge pre_a[ECMULT_TABLE_SIZE(WINDOW_A)];
+    struct secp256k1_strauss_point_state ps[1];
+    struct secp256k1_strauss_state state;
+
+    state.aux = aux;
+    state.pre_a = pre_a;
+    state.ps = ps;
+    secp256k1_ecmult_strauss_wnaf(&state, r, 1, a, na, ng);
 }
 static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp256k1_scalar *sigs, const secp256k1_ge *pubkey, const secp256k1_scalar *message) {
     uchar c[32];

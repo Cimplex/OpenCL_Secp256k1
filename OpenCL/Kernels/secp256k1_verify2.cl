@@ -46,7 +46,7 @@ static void secp256k1_u128_mul(secp256k1_uint128 *r, ulong a, ulong b) {
 	r->lo = lowPart;
 	r->hi = highPart;
 }
-static void secp256k1_u128_accum(secp256k1_uint128 *r, ulong a) {
+static void secp256k1_u128_accum_u64(secp256k1_uint128 *r, ulong a) {
     uchar carry;
 	r->lo = r->lo + a;
 	carry = (r->lo < a);
@@ -91,9 +91,17 @@ static ulong secp256k1_i128_to_u64(const secp256k1_int128 *a) {
     return a->lo;
 }
 
-// NEEDS TESTING
+static void secp256k1_u128_from_u64(secp256k1_uint128 *r, ulong a) {
+    r->lo = a;
+}
+
+// NEEDS TESTING (check negative)
 static long secp256k1_i128_to_i64(const secp256k1_int128 *a) {
-   return (long)a->lo;
+    return (long)a->lo;
+}
+
+static ulong secp256k1_u128_to_u64(const secp256k1_uint128 *a) {
+   return a->lo;
 }
 
 // NEEDS TESTING
@@ -101,6 +109,18 @@ static void secp256k1_i128_rshift(secp256k1_int128 *r, unsigned int n) {
 	r->hi >>= n;
 	r->hi |= r->lo << (64 - n);
 	r->lo >>= n;
+}
+
+// NEEDS TESTING (check negative)
+static void secp256k1_u128_rshift(secp256k1_uint128 *r, unsigned int n) {
+	r->hi >>= n;
+	r->hi |= r->lo << (64 - n);
+	r->lo >>= n;
+}
+
+// NEEDS TESTING
+static ulong secp256k1_u128_hi_u64(const secp256k1_uint128 *a) {
+   return a->hi;
 }
 
 
@@ -474,6 +494,14 @@ static void muladd(ulong a, ulong b, ulong *c0, ulong *c1, uint *c2) {
 	*c1 += t.hi;           // overflow is handled on the next line
 	*c2 += (*c1 < t.hi);   // never overflows by contract
 }
+static void muladd_ulong(ulong a, ulong b, ulong *c0, ulong *c1, ulong *c2) {
+	secp256k1_uint128 t;
+	secp256k1_u128_mul(&t, a, b);
+	*c0 += t.lo;           // overflow is handled on the next line
+	t.hi += (*c0 < t.lo);  // at most 0xFFFFFFFFFFFFFFFF
+	*c1 += t.hi;           // overflow is handled on the next line
+	*c2 += (*c1 < t.hi);   // never overflows by contract
+}
 static void extract_fast(ulong *n, ulong *c0, ulong *c1) {
 	*n = *c0;
     *c0 = *c1;
@@ -484,6 +512,23 @@ static void extract(ulong *n, ulong *c0, ulong *c1, uint *c2) {
     *c0 = *c1;
     *c1 = *c2;
     *c2 = 0;
+}
+static void extract_ulong(ulong *n, ulong *c0, ulong *c1, ulong *c2) {
+	*n = *c0;
+    *c0 = *c1;
+    *c1 = *c2;
+    *c2 = 0;
+}
+static void sumadd(ulong a, ulong *c0, ulong *c1, ulong *c2) { \
+    uint over;
+    *c0 += (a);            // overflow is handled on the next line
+    over = (*c0 < (a));
+    *c1 += over;           // overflow is handled on the next line
+    *c2 += (*c1 < over);   // never overflows by contract
+}
+static void sumadd_fast(ulong a, ulong *c0, ulong *c1) {
+    *c0 += (a);            // overflow is handled on the next line
+    *c1 += (*c0 < (a));    // never overflows by contract (verified the next line)
 }
 
 /** A scalar modulo the group order of the secp256k1 curve. */
@@ -513,6 +558,7 @@ static int secp256k1_scalar_is_high(const secp256k1_scalar *a) {
 static int secp256k1_scalar_is_zero(const secp256k1_scalar *a) {
     return (a->d[0] | a->d[1] | a->d[2] | a->d[3]) == 0;
 }
+// NEEDS TESTING - Redo this garbage
 static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
     secp256k1_uint128 t;
 
@@ -520,7 +566,7 @@ static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
 	t.lo = r->d[0];
     
 	//secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_0);
-	secp256k1_u128_accum(&t, overflow * SECP256K1_N_C_0);
+	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_0);
  
 	//r->d[0] = secp256k1_u128_to_u64(&t);
 	r->d[0] = t.lo;
@@ -530,10 +576,10 @@ static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
 	t.hi = 0;
 	
 	//secp256k1_u128_accum_u64(&t, r->d[1]);
-	secp256k1_u128_accum(&t, r->d[1]);
+	secp256k1_u128_accum_u64(&t, r->d[1]);
 
     //secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_1);
-	secp256k1_u128_accum(&t, overflow * SECP256K1_N_C_1);
+	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_1);
     
 	//r->d[1] = secp256k1_u128_to_u64(&t);
 	r->d[1] = t.lo;
@@ -543,10 +589,10 @@ static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
 	t.hi = 0;
 
     //secp256k1_u128_accum_u64(&t, r->d[2]);
-	secp256k1_u128_accum(&t, r->d[2]);
+	secp256k1_u128_accum_u64(&t, r->d[2]);
 
     //secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_2);
-	secp256k1_u128_accum(&t, overflow * SECP256K1_N_C_2);
+	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_2);
 
     //r->d[2] = secp256k1_u128_to_u64(&t);
 	r->d[2] = t.lo;
@@ -556,7 +602,7 @@ static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
 	t.hi = 0;
     
 	//secp256k1_u128_accum_u64(&t, r->d[3]);
-	secp256k1_u128_accum(&t, r->d[3]);
+	secp256k1_u128_accum_u64(&t, r->d[3]);
 
     //r->d[3] = secp256k1_u128_to_u64(&t);
     r->d[3] = t.lo;
@@ -641,51 +687,45 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     c0 = l[0]; c1 = 0; c2 = 0;
     muladd_fast(n0, SECP256K1_N_C_0, &c0, &c1);
     extract_fast(&m0, &c0, &c1);
-
-
-
-	// continue.... zzzzz
-
-
-    sumadd_fast(l[1]);
-    muladd(n1, SECP256K1_N_C_0);
-    muladd(n0, SECP256K1_N_C_1);
-    extract(m1);
-    sumadd(l[2]);
-    muladd(n2, SECP256K1_N_C_0);
-    muladd(n1, SECP256K1_N_C_1);
-    sumadd(n0);
-    extract(m2);
-    sumadd(l[3]);
-    muladd(n3, SECP256K1_N_C_0);
-    muladd(n2, SECP256K1_N_C_1);
-    sumadd(n1);
-    extract(m3);
-    muladd(n3, SECP256K1_N_C_1);
-    sumadd(n2);
-    extract(m4);
-    sumadd_fast(n3);
-    extract_fast(m5);
+    sumadd_fast(l[1], &c0, &c1);
+	muladd_ulong(n1, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n0, SECP256K1_N_C_1, &c0, &c1, &c2);
+    extract_ulong(&m1, &c0, &c1, &c2);
+    sumadd(l[2], &c0, &c1, &c2);
+	muladd_ulong(n2, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n1, SECP256K1_N_C_1, &c0, &c1, &c2);
+    sumadd(n0, &c0, &c1, &c2);
+    extract_ulong(&m2, &c0, &c1, &c2);
+    sumadd(l[3], &c0, &c1, &c2);
+	muladd_ulong(n3, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n2, SECP256K1_N_C_1, &c0, &c1, &c2);
+    sumadd(n1, &c0, &c1, &c2);
+    extract_ulong(&m3, &c0, &c1, &c2);
+    muladd_ulong(n3, SECP256K1_N_C_1, &c0, &c1, &c2);
+    sumadd(n2, &c0, &c1, &c2);
+    extract_ulong(&m4, &c0, &c1, &c2);
+    sumadd_fast(n3, &c0, &c1);
+    extract_fast(&m5, &c0, &c1);
     m6 = c0;
 
     /* Reduce 385 bits into 258. */
     /* p[0..4] = m[0..3] + m[4..6] * SECP256K1_N_C. */
     c0 = m0; c1 = 0; c2 = 0;
-    muladd_fast(m4, SECP256K1_N_C_0);
-    extract_fast(p0);
-    sumadd_fast(m1);
-    muladd(m5, SECP256K1_N_C_0);
-    muladd(m4, SECP256K1_N_C_1);
-    extract(p1);
-    sumadd(m2);
-    muladd(m6, SECP256K1_N_C_0);
-    muladd(m5, SECP256K1_N_C_1);
-    sumadd(m4);
-    extract(p2);
-    sumadd_fast(m3);
-    muladd_fast(m6, SECP256K1_N_C_1);
-    sumadd_fast(m5);
-    extract_fast(p3);
+    muladd_fast(m4, SECP256K1_N_C_0, &c0, &c1);
+    extract_fast(&p0, &c0, &c1);
+    sumadd_fast(m1, &c0, &c1);
+    muladd_ulong(m5, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(m4, SECP256K1_N_C_1, &c0, &c1, &c2);
+    extract_ulong(&p1, &c0, &c1, &c2);
+    sumadd(m2, &c0, &c1, &c2);
+    muladd_ulong(m6, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(m5, SECP256K1_N_C_1, &c0, &c1, &c2);
+	sumadd(m4, &c0, &c1, &c2);
+    extract_ulong(&p2, &c0, &c1, &c2);
+    sumadd_fast(m3, &c0, &c1);
+    muladd_fast(m6, SECP256K1_N_C_1, &c0, &c1);
+    sumadd_fast(m5, &c0, &c1);
+    extract_fast(&p3, &c0, &c1);
     p4 = c0 + m6;
 
     /* Reduce 258 bits into 256. */
@@ -702,12 +742,10 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     secp256k1_u128_accum_u64(&c128, p3);
     r->d[3] = secp256k1_u128_to_u64(&c128);
     c = secp256k1_u128_hi_u64(&c128);
-#endif
 
     /* Final reduction of r. */
     secp256k1_scalar_reduce(r, c + secp256k1_scalar_check_overflow(r));
 }
-
 static void secp256k1_scalar_mul(secp256k1_scalar *r, const secp256k1_scalar *a, const secp256k1_scalar *b) {
     ulong l[8];
     secp256k1_scalar_mul_512(l, a, b);

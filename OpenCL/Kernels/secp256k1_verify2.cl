@@ -42,6 +42,7 @@ static long ECMULT_TABLE_SIZE(int w) {
  *  Two tables of this size are used (due to the endomorphism
  *  optimization).                                                    */
 #define WINDOW_A 5
+#define WINDOW_G 15
 
 /* int128 and uint128 implementation */
 typedef struct { ulong hi; ulong lo; } secp256k1_uint128;
@@ -423,6 +424,9 @@ typedef struct {
     * normalized. */
     ulong n[5];
 } secp256k1_fe;
+
+// NEEDS TESTING - Check the constant
+__constant secp256k1_fe const_beta = {{ 0x7AE96A2B657C0710UL, 0x6E64479EAC3434E9UL, 0x9CF0497512F58995UL, 0xC1396C28719501EEUL }};
 typedef struct {
     secp256k1_fe x;
     secp256k1_fe y;
@@ -665,6 +669,95 @@ static void secp256k1_fe_mul_inner(ulong *r, const ulong *a, const ulong *b) {
 static void secp256k1_fe_mul(secp256k1_fe *r, const secp256k1_fe *a, const secp256k1_fe *b) {
     secp256k1_fe_mul_inner(r->n, a->n, b->n);
 }
+static void secp256k1_fe_mul_inner_const(ulong *r, const ulong *a, __constant const ulong *b) {
+    secp256k1_uint128 c, d;
+    ulong t3, t4, tx, u0;
+    ulong a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3], a4 = a[4];
+    const ulong M = 0xFFFFFFFFFFFFFUL, R = 0x1000003D10UL;
+
+    /*  [... a b c] is a shorthand for ... + a<<104 + b<<52 + c<<0 mod n.
+     *  for 0 <= x <= 4, px is a shorthand for sum(a[i]*b[x-i], i=0..x).
+     *  for 4 <= x <= 8, px is a shorthand for sum(a[i]*b[x-i], i=(x-4)..4)
+     *  Note that [x 0 0 0 0 0] = [x*R].
+     */
+
+    secp256k1_u128_mul(&d, a0, b[3]);
+    secp256k1_u128_accum_mul(&d, a1, b[2]);
+    secp256k1_u128_accum_mul(&d, a2, b[1]);
+    secp256k1_u128_accum_mul(&d, a3, b[0]);
+    /* [d 0 0 0] = [p3 0 0 0] */
+    secp256k1_u128_mul(&c, a4, b[4]);
+    /* [c 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
+    secp256k1_u128_accum_mul(&d, R, secp256k1_u128_to_u64(&c)); secp256k1_u128_rshift(&c, 64);
+    /* [(c<<12) 0 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
+    t3 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
+    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
+
+    secp256k1_u128_accum_mul(&d, a0, b[4]);
+    secp256k1_u128_accum_mul(&d, a1, b[3]);
+    secp256k1_u128_accum_mul(&d, a2, b[2]);
+    secp256k1_u128_accum_mul(&d, a3, b[1]);
+    secp256k1_u128_accum_mul(&d, a4, b[0]);
+    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+    secp256k1_u128_accum_mul(&d, R << 12, secp256k1_u128_to_u64(&c));
+    /* [d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+    t4 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
+    /* [d t4 t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+    tx = (t4 >> 48); t4 &= (M >> 4);
+    /* [d t4+(tx<<48) t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+
+    secp256k1_u128_mul(&c, a0, b[0]);
+    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 0 p4 p3 0 0 p0] */
+    secp256k1_u128_accum_mul(&d, a1, b[4]);
+    secp256k1_u128_accum_mul(&d, a2, b[3]);
+    secp256k1_u128_accum_mul(&d, a3, b[2]);
+    secp256k1_u128_accum_mul(&d, a4, b[1]);
+    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    u0 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
+    /* [d u0 t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    /* [d 0 t4+(tx<<48)+(u0<<52) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    u0 = (u0 << 4) | tx;
+    /* [d 0 t4+(u0<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    secp256k1_u128_accum_mul(&c, u0, R >> 4);
+    /* [d 0 t4 t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    r[0] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
+    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 0 p0] */
+
+    secp256k1_u128_accum_mul(&c, a0, b[1]);
+    secp256k1_u128_accum_mul(&c, a1, b[0]);
+    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 p1 p0] */
+    secp256k1_u128_accum_mul(&d, a2, b[4]);
+    secp256k1_u128_accum_mul(&d, a3, b[3]);
+    secp256k1_u128_accum_mul(&d, a4, b[2]);
+    /* [d 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
+    secp256k1_u128_accum_mul(&c, secp256k1_u128_to_u64(&d) & M, R); secp256k1_u128_rshift(&d, 52);
+    /* [d 0 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
+    r[1] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
+    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
+
+    secp256k1_u128_accum_mul(&c, a0, b[2]);
+    secp256k1_u128_accum_mul(&c, a1, b[1]);
+    secp256k1_u128_accum_mul(&c, a2, b[0]);
+    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 p2 p1 p0] */
+    secp256k1_u128_accum_mul(&d, a3, b[4]);
+    secp256k1_u128_accum_mul(&d, a4, b[3]);
+    /* [d 0 0 t4 t3 c t1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    secp256k1_u128_accum_mul(&c, R, secp256k1_u128_to_u64(&d)); secp256k1_u128_rshift(&d, 64);
+    /* [(d<<12) 0 0 0 t4 t3 c r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+
+    r[2] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
+    /* [(d<<12) 0 0 0 t4 t3+c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    secp256k1_u128_accum_mul(&c, R << 12, secp256k1_u128_to_u64(&d));
+    secp256k1_u128_accum_u64(&c, t3);
+    /* [t4 c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    r[3] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
+    /* [t4+c r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    r[4] = secp256k1_u128_to_u64(&c) + t4;
+    /* [r4 r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+}
+static void secp256k1_fe_mul_const(secp256k1_fe *r, const secp256k1_fe *a, __constant const secp256k1_fe *b) {
+    secp256k1_fe_mul_inner_const(r->n, a->n, b->n);
+}
 static void secp256k1_fe_mul_int(secp256k1_fe *r, int a) {
     r->n[0] *= a;
     r->n[1] *= a;
@@ -686,6 +779,43 @@ static void secp256k1_fe_normalize_weak(secp256k1_fe *r) {
     t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFUL;
 
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+static int secp256k1_fe_normalizes_to_zero_var(const secp256k1_fe *r) {
+    ulong t0, t1, t2, t3, t4;
+    ulong z0, z1;
+    ulong x;
+
+    t0 = r->n[0];
+    t4 = r->n[4];
+
+    /* Reduce t4 at the start so there will be at most a single carry from the first pass */
+    x = t4 >> 48;
+
+    /* The first pass ensures the magnitude is 1, ... */
+    t0 += x * 0x1000003D1UL;
+
+    /* z0 tracks a possible raw value of 0, z1 tracks a possible raw value of P */
+    z0 = t0 & 0xFFFFFFFFFFFFFUL;
+    z1 = z0 ^ 0x1000003D0UL;
+
+    /* Fast return path should catch the majority of cases */
+    if ((z0 != 0ULL) & (z1 != 0xFFFFFFFFFFFFFUL)) {
+        return 0;
+    }
+
+    t1 = r->n[1];
+    t2 = r->n[2];
+    t3 = r->n[3];
+
+    t4 &= 0x0FFFFFFFFFFFFUL;
+
+    t1 += (t0 >> 52);
+    t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFUL; z0 |= t1; z1 &= t1;
+    t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFUL; z0 |= t2; z1 &= t2;
+    t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFUL; z0 |= t3; z1 &= t3;
+                                                z0 |= t4; z1 &= t4 ^ 0xF000000000000UL;
+
+    return (z0 == 0) | (z1 == 0xFFFFFFFFFFFFFUL);
 }
 static void secp256k1_fe_half(secp256k1_fe *r) {
     ulong t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4];
@@ -747,6 +877,77 @@ static void secp256k1_fe_negate(secp256k1_fe *r, const secp256k1_fe *a, int m) {
     r->n[3] = 0xFFFFFFFFFFFFFUL * 2 * (m + 1) - a->n[3];
     r->n[4] = 0x0FFFFFFFFFFFFUL * 2 * (m + 1) - a->n[4];
 }
+static void secp256k1_ge_set_xy(secp256k1_ge *r, const secp256k1_fe *x, const secp256k1_fe *y) {
+    r->infinity = 0;
+    r->x = *x;
+    r->y = *y;
+}
+static void secp256k1_ge_from_storage(secp256k1_ge *r, const secp256k1_ge_storage *a) {
+    secp256k1_fe_from_storage(&r->x, &a->x);
+    secp256k1_fe_from_storage(&r->y, &a->y);
+    r->infinity = 0;
+}
+static void secp256k1_ge_set_ge_zinv(secp256k1_ge *r, const secp256k1_ge *a, const secp256k1_fe *zi) {
+    secp256k1_fe zi2;
+    secp256k1_fe zi3;
+    secp256k1_fe_sqr(&zi2, zi);
+    secp256k1_fe_mul(&zi3, &zi2, zi);
+    secp256k1_fe_mul(&r->x, &a->x, &zi2);
+    secp256k1_fe_mul(&r->y, &a->y, &zi3);
+    r->infinity = a->infinity;
+}
+static void secp256k1_ge_set_gej_zinv(secp256k1_ge *r, const secp256k1_gej *a, const secp256k1_fe *zi) {
+    secp256k1_fe zi2;
+    secp256k1_fe zi3;
+    secp256k1_fe_sqr(&zi2, zi);
+    secp256k1_fe_mul(&zi3, &zi2, zi);
+    secp256k1_fe_mul(&r->x, &a->x, &zi2);
+    secp256k1_fe_mul(&r->y, &a->y, &zi3);
+    r->infinity = a->infinity;
+}
+static void secp256k1_ge_table_set_globalz(ulong len, secp256k1_ge *a, const secp256k1_fe *zr) {
+    ulong i = len - 1;
+    secp256k1_fe zs;
+
+    if (len > 0) {
+        /* Ensure all y values are in weak normal form for fast negation of points */
+        secp256k1_fe_normalize_weak(&a[i].y);
+        zs = zr[i];
+
+        /* Work our way backwards, using the z-ratios to scale the x/y values. */
+        while (i > 0) {
+            if (i != len - 1) {
+                secp256k1_fe_mul(&zs, &zs, &zr[i]);
+            }
+            i--;
+            secp256k1_ge_set_ge_zinv(&a[i], &a[i], &zs);
+        }
+    }
+}
+static int secp256k1_gej_is_infinity(const secp256k1_gej *a) {
+    return a->infinity;
+}
+static void secp256k1_gej_set_ge(secp256k1_gej *r, const secp256k1_ge *a) {
+   r->infinity = a->infinity;
+   r->x = a->x;
+   r->y = a->y;
+   secp256k1_fe_set_int(&r->z, 1);
+}
+static void secp256k1_gej_set_infinity(secp256k1_gej *r) {
+    r->infinity = 1;
+    secp256k1_fe_clear(&r->x);
+    secp256k1_fe_clear(&r->y);
+    secp256k1_fe_clear(&r->z);
+}
+static void secp256k1_gej_rescale(secp256k1_gej *r, const secp256k1_fe *s) {
+    // Operations: 4 mul, 1 sqr
+    secp256k1_fe zz;
+    secp256k1_fe_sqr(&zz, s);
+    secp256k1_fe_mul(&r->x, &r->x, &zz);  // r->x *= s^2
+    secp256k1_fe_mul(&r->y, &r->y, &zz);
+    secp256k1_fe_mul(&r->y, &r->y, s);    // r->y *= s^3
+    secp256k1_fe_mul(&r->z, &r->z, s);    // r->z *= s
+}
 static void secp256k1_gej_double(secp256k1_gej *r, const secp256k1_gej *a) {
     /* Operations: 3 mul, 4 sqr, 8 add/half/mul_int/negate */
     secp256k1_fe l, s, t;
@@ -778,40 +979,6 @@ static void secp256k1_gej_double(secp256k1_gej *r, const secp256k1_gej *a) {
     secp256k1_fe_add(&r->y, &s);           /* Y3 = L*(X3 + T) + S^2 (2) */
     secp256k1_fe_negate(&r->y, &r->y, 2);  /* Y3 = -(L*(X3 + T) + S^2) (3) */
 }
-static void secp256k1_ge_set_xy(secp256k1_ge *r, const secp256k1_fe *x, const secp256k1_fe *y) {
-    r->infinity = 0;
-    r->x = *x;
-    r->y = *y;
-}
-static void secp256k1_ge_from_storage(secp256k1_ge *r, const secp256k1_ge_storage *a) {
-    secp256k1_fe_from_storage(&r->x, &a->x);
-    secp256k1_fe_from_storage(&r->y, &a->y);
-    r->infinity = 0;
-}
-static void secp256k1_gej_set_ge(secp256k1_gej *r, const secp256k1_ge *a) {
-   r->infinity = a->infinity;
-   r->x = a->x;
-   r->y = a->y;
-   secp256k1_fe_set_int(&r->z, 1);
-}
-static void secp256k1_gej_set_infinity(secp256k1_gej *r) {
-    r->infinity = 1;
-    secp256k1_fe_clear(&r->x);
-    secp256k1_fe_clear(&r->y);
-    secp256k1_fe_clear(&r->z);
-}
-static int secp256k1_gej_is_infinity(const secp256k1_gej *a) {
-    return a->infinity;
-}
-static void secp256k1_gej_rescale(secp256k1_gej *r, const secp256k1_fe *s) {
-    // Operations: 4 mul, 1 sqr
-    secp256k1_fe zz;
-    secp256k1_fe_sqr(&zz, s);
-    secp256k1_fe_mul(&r->x, &r->x, &zz);  // r->x *= s^2
-    secp256k1_fe_mul(&r->y, &r->y, &zz);
-    secp256k1_fe_mul(&r->y, &r->y, s);    // r->y *= s^3
-    secp256k1_fe_mul(&r->z, &r->z, s);    // r->z *= s
-}
 static void secp256k1_gej_double_var(secp256k1_gej *r, const secp256k1_gej *a, secp256k1_fe *rzr) {
     /** For secp256k1, 2Q is infinity if and only if Q is infinity. This is because if 2Q = infinity,
      *  Q must equal -Q, or that Q.y == -(Q.y), or Q.y is 0. For a point on y^2 = x^3 + 7 to have
@@ -837,6 +1004,62 @@ static void secp256k1_gej_double_var(secp256k1_gej *r, const secp256k1_gej *a, s
     }
 
     secp256k1_gej_double(r, a);
+}
+static void secp256k1_gej_add_ge_var(secp256k1_gej *r, const secp256k1_gej *a, const secp256k1_ge *b, secp256k1_fe *rzr) {
+    /* 8 mul, 3 sqr, 13 add/negate/normalize_weak/normalizes_to_zero (ignoring special cases) */
+    secp256k1_fe z12, u1, u2, s1, s2, h, i, h2, h3, t;
+
+    if (a->infinity) {
+        secp256k1_gej_set_ge(r, b);
+        return;
+    }
+    if (b->infinity) {
+        if (rzr != 0) {
+            secp256k1_fe_set_int(rzr, 1);
+        }
+        *r = *a;
+        return;
+    }
+
+    secp256k1_fe_sqr(&z12, &a->z);
+    u1 = a->x; secp256k1_fe_normalize_weak(&u1);
+    secp256k1_fe_mul(&u2, &b->x, &z12);
+    s1 = a->y; secp256k1_fe_normalize_weak(&s1);
+    secp256k1_fe_mul(&s2, &b->y, &z12); secp256k1_fe_mul(&s2, &s2, &a->z);
+    secp256k1_fe_negate(&h, &u1, 1); secp256k1_fe_add(&h, &u2);
+    secp256k1_fe_negate(&i, &s2, 1); secp256k1_fe_add(&i, &s1);
+    if (secp256k1_fe_normalizes_to_zero_var(&h)) {
+        if (secp256k1_fe_normalizes_to_zero_var(&i)) {
+            secp256k1_gej_double_var(r, a, rzr);
+        } else {
+            if (rzr != 0) {
+                secp256k1_fe_set_int(rzr, 0);
+            }
+            secp256k1_gej_set_infinity(r);
+        }
+        return;
+    }
+
+    r->infinity = 0;
+    if (rzr != 0) {
+        *rzr = h;
+    }
+    secp256k1_fe_mul(&r->z, &a->z, &h);
+
+    secp256k1_fe_sqr(&h2, &h);
+    secp256k1_fe_negate(&h2, &h2, 1);
+    secp256k1_fe_mul(&h3, &h2, &h);
+    secp256k1_fe_mul(&t, &u1, &h2);
+
+    secp256k1_fe_sqr(&r->x, &i);
+    secp256k1_fe_add(&r->x, &h3);
+    secp256k1_fe_add(&r->x, &t);
+    secp256k1_fe_add(&r->x, &t);
+
+    secp256k1_fe_add(&t, &r->x);
+    secp256k1_fe_mul(&r->y, &t, &i);
+    secp256k1_fe_mul(&h3, &h3, &s1);
+    secp256k1_fe_add(&r->y, &h3);
 }
 
 /** Mathmatical functions for secp256k1_scalar_mul_512 and secp256k1_scalar_reduce_512. */
@@ -986,10 +1209,10 @@ static void secp256k1_scalar_set_b32(secp256k1_scalar *r, const unsigned char *b
         *overflow = over;
     }
 }
-static unsigned int secp256k1_scalar_get_bits(const secp256k1_scalar *a, uint offset, uint count) {
+static uint secp256k1_scalar_get_bits(const secp256k1_scalar *a, uint offset, uint count) {
     return (a->d[offset >> 6] >> (offset & 0x3F)) & ((((ulong)1) << count) - 1);
 }
-static unsigned int secp256k1_scalar_get_bits_var(const secp256k1_scalar *a, uint offset, uint count) {
+static uint secp256k1_scalar_get_bits_var(const secp256k1_scalar *a, uint offset, uint count) {
     if ((offset + count - 1) >> 6 == offset >> 6) {
         return secp256k1_scalar_get_bits(a, offset, count);
     } else {
@@ -1071,37 +1294,6 @@ static void secp256k1_scalar_negate(secp256k1_scalar *r, const secp256k1_scalar 
     secp256k1_u128_accum_u64(&t, SECP256K1_N_3);
     r->d[3] = secp256k1_u128_to_u64(&t) & nonzero;
 }
-static void secp256k1_scalar_mul_512(ulong l[8], const secp256k1_scalar *a, __constant const secp256k1_scalar *b) {
-    /* 160 bit accumulator. */
-    ulong c0 = 0, c1 = 0;
-    uint c2 = 0;
-
-    /* l[0..7] = a[0..3] * b[0..3]. */
-    muladd_fast(a->d[0], b->d[0], &c0, &c1);
-    extract_fast(&l[0], &c0, &c1);
-    muladd(a->d[0], b->d[1], &c0, &c1, &c2);
-    muladd(a->d[1], b->d[0], &c0, &c1, &c2);
-    extract(&l[1], &c0, &c1, &c2);
-    muladd(a->d[0], b->d[2], &c0, &c1, &c2);
-    muladd(a->d[1], b->d[1], &c0, &c1, &c2);
-    muladd(a->d[2], b->d[0], &c0, &c1, &c2);
-    extract(&l[2], &c0, &c1, &c2);
-    muladd(a->d[0], b->d[3], &c0, &c1, &c2);
-    muladd(a->d[1], b->d[2], &c0, &c1, &c2);
-    muladd(a->d[2], b->d[1], &c0, &c1, &c2);
-    muladd(a->d[3], b->d[0], &c0, &c1, &c2);
-    extract(&l[3], &c0, &c1, &c2);
-    muladd(a->d[1], b->d[3], &c0, &c1, &c2);
-    muladd(a->d[2], b->d[2], &c0, &c1, &c2);
-    muladd(a->d[3], b->d[1], &c0, &c1, &c2);
-    extract(&l[4], &c0, &c1, &c2);
-    muladd(a->d[2], b->d[3], &c0, &c1, &c2);
-    muladd(a->d[3], b->d[2], &c0, &c1, &c2);
-    extract(&l[5], &c0, &c1, &c2);
-    muladd_fast(a->d[3], b->d[3], &c0, &c1);
-    extract_fast(&l[6], &c0, &c1);
-    l[7] = c0;
-}
 static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     secp256k1_uint128 c128;
 
@@ -1174,7 +1366,74 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     /* Final reduction of r. */
     secp256k1_scalar_reduce(r, c + secp256k1_scalar_check_overflow(r));
 }
-static void secp256k1_scalar_mul(secp256k1_scalar *r, const secp256k1_scalar *a, __constant const secp256k1_scalar *b) {
+static void secp256k1_scalar_mul_512_const(ulong l[8], const secp256k1_scalar *a, __constant const secp256k1_scalar *b) {
+    /* 160 bit accumulator. */
+    ulong c0 = 0, c1 = 0;
+    uint c2 = 0;
+
+    /* l[0..7] = a[0..3] * b[0..3]. */
+    muladd_fast(a->d[0], b->d[0], &c0, &c1);
+    extract_fast(&l[0], &c0, &c1);
+    muladd(a->d[0], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[0], &c0, &c1, &c2);
+    extract(&l[1], &c0, &c1, &c2);
+    muladd(a->d[0], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[0], &c0, &c1, &c2);
+    extract(&l[2], &c0, &c1, &c2);
+    muladd(a->d[0], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[0], &c0, &c1, &c2);
+    extract(&l[3], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[1], &c0, &c1, &c2);
+    extract(&l[4], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[2], &c0, &c1, &c2);
+    extract(&l[5], &c0, &c1, &c2);
+    muladd_fast(a->d[3], b->d[3], &c0, &c1);
+    extract_fast(&l[6], &c0, &c1);
+    l[7] = c0;
+}
+static void secp256k1_scalar_mul_const(secp256k1_scalar *r, const secp256k1_scalar *a, __constant const secp256k1_scalar *b) {
+    ulong l[8];
+    secp256k1_scalar_mul_512_const(l, a, b);
+    secp256k1_scalar_reduce_512(r, l);
+}
+static void secp256k1_scalar_mul_512(ulong l[8], const secp256k1_scalar *a, const secp256k1_scalar *b) {
+    /* 160 bit accumulator. */
+    ulong c0 = 0, c1 = 0;
+    uint c2 = 0;
+
+    /* l[0..7] = a[0..3] * b[0..3]. */
+    muladd_fast(a->d[0], b->d[0], &c0, &c1);
+    extract_fast(&l[0], &c0, &c1);
+    muladd(a->d[0], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[0], &c0, &c1, &c2);
+    extract(&l[1], &c0, &c1, &c2);
+    muladd(a->d[0], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[0], &c0, &c1, &c2);
+    extract(&l[2], &c0, &c1, &c2);
+    muladd(a->d[0], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[1], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[0], &c0, &c1, &c2);
+    extract(&l[3], &c0, &c1, &c2);
+    muladd(a->d[1], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[2], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[1], &c0, &c1, &c2);
+    extract(&l[4], &c0, &c1, &c2);
+    muladd(a->d[2], b->d[3], &c0, &c1, &c2);
+    muladd(a->d[3], b->d[2], &c0, &c1, &c2);
+    extract(&l[5], &c0, &c1, &c2);
+    muladd_fast(a->d[3], b->d[3], &c0, &c1);
+    extract_fast(&l[6], &c0, &c1);
+    l[7] = c0;
+}
+static void secp256k1_scalar_mul(secp256k1_scalar *r, const secp256k1_scalar *a, const secp256k1_scalar *b) {
     ulong l[8];
     secp256k1_scalar_mul_512(l, a, b);
     secp256k1_scalar_reduce_512(r, l);
@@ -1184,7 +1443,7 @@ static void secp256k1_scalar_mul_shift_var(secp256k1_scalar *r, const secp256k1_
     unsigned int shiftlimbs;
     unsigned int shiftlow;
     unsigned int shifthigh;
-    secp256k1_scalar_mul_512(l, a, b);
+    secp256k1_scalar_mul_512_const(l, a, b);
     shiftlimbs = shift >> 6;
     shiftlow = shift & 0x3F;
     shifthigh = 64 - shiftlow;
@@ -1194,16 +1453,26 @@ static void secp256k1_scalar_mul_shift_var(secp256k1_scalar *r, const secp256k1_
     r->d[3] = shift < 320 ? (l[3 + shiftlimbs] >> shiftlow) : 0;
     secp256k1_scalar_cadd_bit(r, 0, (l[(shift - 1) >> 6] >> ((shift - 1) & 0x3f)) & 1);
 }
+static void secp256k1_scalar_split_128(secp256k1_scalar *r1, secp256k1_scalar *r2, const secp256k1_scalar *k) {
+    r1->d[0] = k->d[0];
+    r1->d[1] = k->d[1];
+    r1->d[2] = 0;
+    r1->d[3] = 0;
+    r2->d[0] = k->d[2];
+    r2->d[1] = k->d[3];
+    r2->d[2] = 0;
+    r2->d[3] = 0;
+}
 static void secp256k1_scalar_split_lambda(secp256k1_scalar *r1, secp256k1_scalar *r2, const secp256k1_scalar *k) {
     secp256k1_scalar c1, c2;
 
     /* these _var calls are constant time since the shift amount is constant */
     secp256k1_scalar_mul_shift_var(&c1, k, &const_g1, 384);
     secp256k1_scalar_mul_shift_var(&c2, k, &const_g2, 384);
-    secp256k1_scalar_mul(&c1, &c1, &const_minus_b1);
-    secp256k1_scalar_mul(&c2, &c2, &const_minus_b2);
+    secp256k1_scalar_mul_const(&c1, &c1, &const_minus_b1);
+    secp256k1_scalar_mul_const(&c2, &c2, &const_minus_b2);
     secp256k1_scalar_add(r2, &c1, &c2);
-    secp256k1_scalar_mul(r1, r2, &const_lambda);
+    secp256k1_scalar_mul_const(r1, r2, &const_lambda);
     secp256k1_scalar_negate(r1, r1);
     secp256k1_scalar_add(r1, r1, k);
 }
@@ -1306,8 +1575,6 @@ static void secp256k1_ecmult_odd_multiples_table(int n, secp256k1_ge *pre_a, sec
 
     secp256k1_gej_double_var(&d, a, 0);
 
-	// ... continue
-
     /*
      * Perform the additions using an isomorphic curve Y^2 = X^3 + 7*C^6 where C := d.z.
      * The isomorphism, phi, maps a secp256k1 point (x, y) to the point (x*C^2, y*C^3) on the other curve.
@@ -1402,7 +1669,7 @@ static void secp256k1_ecmult_strauss_wnaf(const struct secp256k1_strauss_state *
 
     for (np = 0; np < no; ++np) {
         for (i = 0; i < ECMULT_TABLE_SIZE(WINDOW_A); i++) {
-            secp256k1_fe_mul(&state->aux[np * ECMULT_TABLE_SIZE(WINDOW_A) + i], &state->pre_a[np * ECMULT_TABLE_SIZE(WINDOW_A) + i].x, &secp256k1_const_beta);
+            secp256k1_fe_mul_const(&state->aux[np * ECMULT_TABLE_SIZE(WINDOW_A) + i], &state->pre_a[np * ECMULT_TABLE_SIZE(WINDOW_A) + i].x, &const_beta);
         }
     }
 
@@ -1425,11 +1692,11 @@ static void secp256k1_ecmult_strauss_wnaf(const struct secp256k1_strauss_state *
 
     for (i = bits - 1; i >= 0; i--) {
         int n;
-        secp256k1_gej_double_var(r, r, NULL);
+        secp256k1_gej_double_var(r, r, 0);
         for (np = 0; np < no; ++np) {
             if (i < state->ps[np].bits_na_1 && (n = state->ps[np].wnaf_na_1[i])) {
                 secp256k1_ecmult_table_get_ge(&tmpa, state->pre_a + np * ECMULT_TABLE_SIZE(WINDOW_A), n, WINDOW_A);
-                secp256k1_gej_add_ge_var(r, r, &tmpa, NULL);
+                secp256k1_gej_add_ge_var(r, r, &tmpa, 0);
             }
             if (i < state->ps[np].bits_na_lam && (n = state->ps[np].wnaf_na_lam[i])) {
                 secp256k1_ecmult_table_get_ge_lambda(&tmpa, state->pre_a + np * ECMULT_TABLE_SIZE(WINDOW_A), state->aux + np * ECMULT_TABLE_SIZE(WINDOW_A), n, WINDOW_A);

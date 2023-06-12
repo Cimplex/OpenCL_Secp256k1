@@ -1328,13 +1328,46 @@ static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
 
 	return overflow;
 }
-static void secp256k1_scalar_set_b32(secp256k1_scalar *r, const unsigned char *b32, int *overflow) {
+static void secp256k1_scalar_set_b32(secp256k1_scalar *r, const uchar *b32, int *overflow) {
     int over;
-    r->d[0] = (ulong)b32[31] | (ulong)b32[30] << 8 | (ulong)b32[29] << 16 | (ulong)b32[28] << 24 | (ulong)b32[27] << 32 | (ulong)b32[26] << 40 | (ulong)b32[25] << 48 | (ulong)b32[24] << 56;
-    r->d[1] = (ulong)b32[23] | (ulong)b32[22] << 8 | (ulong)b32[21] << 16 | (ulong)b32[20] << 24 | (ulong)b32[19] << 32 | (ulong)b32[18] << 40 | (ulong)b32[17] << 48 | (ulong)b32[16] << 56;
-    r->d[2] = (ulong)b32[15] | (ulong)b32[14] << 8 | (ulong)b32[13] << 16 | (ulong)b32[12] << 24 | (ulong)b32[11] << 32 | (ulong)b32[10] << 40 | (ulong)b32[9] << 48 | (ulong)b32[8] << 56;
-    r->d[3] = (ulong)b32[7] | (ulong)b32[6] << 8 | (ulong)b32[5] << 16 | (ulong)b32[4] << 24 | (ulong)b32[3] << 32 | (ulong)b32[2] << 40 | (ulong)b32[1] << 48 | (ulong)b32[0] << 56;
+    r->d[0] = (ulong)b32[31]
+		| (ulong)b32[30] << 8
+		| (ulong)b32[29] << 16
+		| (ulong)b32[28] << 24
+		| (ulong)b32[27] << 32
+		| (ulong)b32[26] << 40
+		| (ulong)b32[25] << 48
+		| (ulong)b32[24] << 56;
+
+    r->d[1] = (ulong)b32[23]
+		| (ulong)b32[22] << 8
+		| (ulong)b32[21] << 16
+		| (ulong)b32[20] << 24
+		| (ulong)b32[19] << 32
+		| (ulong)b32[18] << 40
+		| (ulong)b32[17] << 48
+		| (ulong)b32[16] << 56;
+
+    r->d[2] = (ulong)b32[15]
+		| (ulong)b32[14] << 8
+		| (ulong)b32[13] << 16
+		| (ulong)b32[12] << 24
+		| (ulong)b32[11] << 32
+		| (ulong)b32[10] << 40
+		| (ulong)b32[9] << 48
+		| (ulong)b32[8] << 56;
+
+    r->d[3] = (ulong)b32[7]
+		| (ulong)b32[6] << 8
+		| (ulong)b32[5] << 16
+		| (ulong)b32[4] << 24
+		| (ulong)b32[3] << 32
+		| (ulong)b32[2] << 40
+		| (ulong)b32[1] << 48
+		| (ulong)b32[0] << 56;
+
     over = secp256k1_scalar_reduce(r, secp256k1_scalar_check_overflow(r));
+
     if (overflow) {
         *overflow = over;
     }
@@ -1613,15 +1646,67 @@ static void secp256k1_scalar_split_lambda(secp256k1_scalar *r1, secp256k1_scalar
     secp256k1_scalar_add(r1, r1, k);
 }
 
-typedef struct { unsigned char data[64]; } secp256k1_pubkey;
-typedef struct { unsigned char data[64]; } secp256k1_ecdsa_signature;
+// memcpy reimplementations for opencl structures
+static void memcpy_to_secp256k1_scalar(secp256k1_scalar *r, const uchar *src, uint size) {
+	uint i8 = 0;
+	for (uint i = 0; i < size; i += 8) {
+		r->d[i8++] = ((ulong)src[i]) << 56
+			| ((ulong)src[i + 1]) << 48
+			| ((ulong)src[i + 2]) << 40
+			| ((ulong)src[i + 3]) << 32
+			| ((ulong)src[i + 4]) << 24
+			| ((ulong)src[i + 5]) << 16
+			| ((ulong)src[i + 6]) << 8
+			| ((ulong)src[i + 7]);
+	}
+}
+static void memcpy_to_secp256k1_ge_storage(secp256k1_ge_storage *s, const uchar *src, uint size) {
+	uint i8 = 0;
+	for (uint i = 0; i < size; i += 8) {
+		s->x.n[i8] = ((ulong)src[i]) << 56
+			| ((ulong)src[i + 1]) << 48
+			| ((ulong)src[i + 2]) << 40
+			| ((ulong)src[i + 3]) << 32
+			| ((ulong)src[i + 4]) << 24
+			| ((ulong)src[i + 5]) << 16
+			| ((ulong)src[i + 6]) << 8
+			| ((ulong)src[i + 7]);
+		s->y.n[i8] = ((ulong)src[i + 32]) << 56
+			| ((ulong)src[i + 33]) << 48
+			| ((ulong)src[i + 34]) << 40
+			| ((ulong)src[i + 35]) << 32
+			| ((ulong)src[i + 36]) << 24
+			| ((ulong)src[i + 37]) << 16
+			| ((ulong)src[i + 38]) << 8
+			| ((ulong)src[i + 39]);
+		i8++;
+	}
+}
+static void memcpy_to_message(uchar* s, __global uchar* src, uint offset) {
+	for (uint i = 0; i < 32; i++) {
+		s[i] = src[offset + i];
+	}
+}
+
+typedef struct { uchar data[64]; } secp256k1_pubkey;
+typedef struct { uchar data[64]; } secp256k1_ecdsa_signature;
+static void secp256k1_pubkey_create(secp256k1_pubkey *r, __global uchar* pub, uint offset) {
+	for (uint i = 0; i < 64; i++) {
+		r->data[i] = pub[offset + i];
+	}
+}
+static void secp256k1_ecdsa_signature_create(secp256k1_ecdsa_signature *r, __global uchar* sig, uint offset) {
+	for (uint i = 0; i < 64; i++) {
+		r->data[i] = sig[offset + i];
+	}
+}
 static void secp256k1_ecdsa_signature_load(secp256k1_scalar* r, secp256k1_scalar* s, const secp256k1_ecdsa_signature* sig) {
     if (sizeof(secp256k1_scalar) == 32) {
         /* When the secp256k1_scalar type is exactly 32 byte, use its
          * representation inside secp256k1_ecdsa_signature, as conversion is very fast.
          * Note that secp256k1_ecdsa_signature_save must use the same representation. */
-        memcpy(r, &sig->data[0], 32);
-        memcpy(s, &sig->data[32], 32);
+        memcpy_to_secp256k1_scalar(r, &sig->data[0], 32);
+        memcpy_to_secp256k1_scalar(s, &sig->data[32], 32);
     } else {
         secp256k1_scalar_set_b32(r, &sig->data[0], 0);
         secp256k1_scalar_set_b32(s, &sig->data[32], 0);
@@ -1633,9 +1718,7 @@ static int secp256k1_pubkey_load(secp256k1_ge* ge, const secp256k1_pubkey* pubke
          * representation inside secp256k1_pubkey, as conversion is very fast.
          * Note that secp256k1_pubkey_save must use the same representation. */
         secp256k1_ge_storage s;
-
-		// TODO: Implement custom memcpy
-        memcpy(&s, &pubkey->data[0], sizeof(s));
+        memcpy_to_secp256k1_ge_storage(&s, &pubkey->data[0], sizeof(s));
         secp256k1_ge_from_storage(ge, &s);
     } else {
         /* Otherwise, fall back to 32-byte big endian for X and Y. */
@@ -1952,7 +2035,7 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp25
     return 0;
 }
 
-static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const unsigned char *msghash32, const secp256k1_pubkey *pubkey) {
+static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const uchar *msghash32, const secp256k1_pubkey *pubkey) {
     secp256k1_ge q;
     secp256k1_scalar r, s;
     secp256k1_scalar m;
@@ -1962,4 +2045,21 @@ static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const un
     return (!secp256k1_scalar_is_high(&s) &&
             secp256k1_pubkey_load(&q, pubkey) &&
             secp256k1_ecdsa_sig_verify(&r, &s, &q, &m));
+}
+
+
+__kernel void run_secp256k1_ecdsa_verify(__global uchar* signatures, __global uchar* public_keys, __global uchar* messages, __global uint* results) {
+	uint i = get_global_id(0);
+	uint i64 = i * 64;
+	uint i32 = i * 32;
+
+	secp256k1_pubkey pubkey;
+	secp256k1_ecdsa_signature sig;
+	uchar message[32];
+
+	memcpy_to_message(message, messages, i32);
+	secp256k1_pubkey_create(&pubkey, public_keys, i64);
+	secp256k1_ecdsa_signature_create(&sig, signatures, i64);
+
+	results[i] = secp256k1_ecdsa_verify(&sig, message, &pubkey);
 }

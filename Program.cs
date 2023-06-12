@@ -3,8 +3,40 @@ using System.Runtime.InteropServices;
 using OpenCL_Secp256k1.OpenCL;
 using OpenCL_Secp256k1.OpenCL.Kernels;
 using Silk.NET.OpenCL;
+using Secp256k1Net;
+
 
 // Welcome to programming with OpenCL, lets keep it simple
+
+
+
+using var secp256k1 = new Secp256k1();
+
+// Generate a private key
+var privateKey = new byte[Secp256k1.PRIVKEY_LENGTH];
+var rnd = System.Security.Cryptography.RandomNumberGenerator.Create();
+do { rnd.GetBytes(privateKey); }
+while (!secp256k1.SecretKeyVerify(privateKey));
+
+// Derive public key bytes
+var publicKey = new byte[Secp256k1.PUBKEY_LENGTH];
+
+if ( ! secp256k1.PublicKeyCreate(publicKey, privateKey))
+	throw new Exception("Could not derive public key");
+
+
+Console.WriteLine($"Private Key: {Convert.ToHexString(privateKey)}");
+Console.WriteLine($"Public Key: {Convert.ToHexString(publicKey)}");
+
+
+
+
+
+
+
+
+
+/*
 
 // Setup OpenCL context, first we select the platform (NVidia, AMD, Intel, Apple, etc.)
 Platform? platform = Platform.GetPlatform("*Apple*", DeviceTypes.Gpu);
@@ -102,3 +134,4 @@ Console.WriteLine("OpenCL Result: " + hexStringOpenCL);
 
 string hexString = bigResult.ToString("X");
 Console.WriteLine("BigInt Result: " + hexString);
+*/

@@ -8,7 +8,7 @@ public class Secp256k1_Verify : KernelBase, IDisposable
 
 	public override (string, string)[] KernelPaths => new[]
 	{
-		("secp256k1_verify", "OpenCL_Secp256k1.OpenCL.Kernels.secp256k1_verify.cl"),
+		("run_secp256k1_ecdsa_verify", "OpenCL_Secp256k1.OpenCL.Kernels.secp256k1_verify2.cl"),
 		("secp256k1_int128_test_mul", "OpenCL_Secp256k1.OpenCL.Kernels.secp256k1_int128_tests.cl"),
 	};
 
@@ -19,7 +19,7 @@ public class Secp256k1_Verify : KernelBase, IDisposable
 		// This is a helper class that lets us load kernels from our resources
 		KernelLibrary = CreateKernelLibrary();
 
-		_kernel = KernelLibrary.CreateKernel(command_queue, device, context, "secp256k1_int128_test_mul");
+		_kernel = KernelLibrary.CreateKernel(command_queue, device, context, "run_secp256k1_ecdsa_verify");
 	}
 
 	// Input = ByteArray

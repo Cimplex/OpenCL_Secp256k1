@@ -9,6 +9,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Secp256k1.Net" Version="1.1.0" />
 		<PackageReference Include="Silk.NET.Core" Version="2.17.1" />
 		<PackageReference Include="Silk.NET.OpenCL" Version="2.17.1" />
 		<PackageReference Include="Silk.NET.OpenCL.Extensions.APPLE" Version="2.17.1" />

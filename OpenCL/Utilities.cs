@@ -6,6 +6,11 @@ namespace OpenCL_Secp256k1.OpenCL;
 
 public static class Utilities
 {
+	public static void error(string message)
+	{
+		throw new Exception(message);
+	}
+
 	#region Program Query Functions
 
 	public unsafe static byte[] GetProgramBuildInfo(IntPtr program, IntPtr device, ProgramBuildInfo info)

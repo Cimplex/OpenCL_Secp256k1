@@ -85,8 +85,8 @@ public static class Secp256k1_Int128_Tests
 		// Setup some test data
 
 		// Going to multiply these two long numbers to get a 128bit number
-		long a = -1234567890123456789;
-		long b = long.MaxValue;
+		long a = -long.MaxValue;
+		long b = -long.MaxValue;
 
 		// Add setup data to the input buffer
 		Array.Copy(BitConverter.GetBytes(a), 0, _input, 8, 8);
@@ -98,7 +98,7 @@ public static class Secp256k1_Int128_Tests
 		BigInteger bigA = new BigInteger(a);
 		BigInteger bigB = new BigInteger(b);
 		BigInteger big16 = new BigInteger(16);
-		BigInteger bigResult = (bigA * bigB) + (bigA * bigB) + big16;
+		BigInteger bigResult = bigA + bigB;
 
 		// Do the calculation in OpenCL
 		nint waitEvent = kernel.Run(input, output, 1);
@@ -118,7 +118,6 @@ public static class Secp256k1_Int128_Tests
 
 		string hexStringB = bigB.ToString("X");
 		Console.WriteLine("B: " + hexStringB + "\n\n");
-
 
 		string hexStringOpenCL = openCLResult.ToString("X");
 		Console.WriteLine("OpenCL Result: " + hexStringOpenCL);

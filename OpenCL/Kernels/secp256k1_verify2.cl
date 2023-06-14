@@ -44,101 +44,77 @@ static long ECMULT_TABLE_SIZE(int w) {
 #define WINDOW_A 5
 #define WINDOW_G 15
 
-/* int128 and uint128 implementation */
+/* unsigned int128 implementation */
 typedef struct { ulong hi; ulong lo; } secp256k1_uint128;
-typedef struct { long hi; ulong lo; } secp256k1_int128;
-static void secp256k1_u128_add(secp256k1_uint128 *r, const secp256k1_uint128 *a, const secp256k1_uint128 *b) {
-    uchar carry;
-
-    r->lo = a->lo + b->lo;
-    carry = (r->lo < a->lo) || (r->lo < b->lo);
-
-    r->hi = a->hi + b->hi + carry;
-}
-static void secp256k1_u128_mul(secp256k1_uint128 *r, ulong a, ulong b) {
-    ulong lowPart = (ulong)a * (ulong)b;
-	ulong highPart = mul_hi(a, b);
-
-	r->lo = lowPart;
-	r->hi = highPart;
-}
-static void secp256k1_u128_accum_u64(secp256k1_uint128 *r, ulong a) {
-    uchar carry;
-	r->lo = r->lo + a;
-	carry = (r->lo < a);
-	r->hi = r->hi + carry;
-}
-static void secp256k1_u128_accum_mul(secp256k1_uint128 *r, ulong a, ulong b) {
-    secp256k1_uint128 ab;
-    secp256k1_u128_mul(&ab, a, b);
-
-    secp256k1_uint128 temp = *r;
-    secp256k1_u128_add(&temp, &temp, &ab);
-    *r = temp;
-}
-
-// NEEDS TESTING (negative carry)
-static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
-    uchar carry;
-
-    r->lo = a->lo + b->lo;
-    carry = (r->lo < a->lo) || (r->lo < b->lo);
-
-    r->hi = a->hi + b->hi + carry;
-}
-static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
-    ulong lowPart = (ulong)a * (ulong)b;
-	long highPart = mul_hi(a, b);
-
-	r->lo = lowPart;
-	r->hi = highPart;
-}
-static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
-    secp256k1_int128 ab;
-    secp256k1_i128_mul(&ab, a, b);
-
-    secp256k1_int128 temp = *r;
-    secp256k1_i128_add(&temp, &temp, &ab);
-    *r = temp;
-}
-
-// NEEDS TESTING
-static ulong secp256k1_i128_to_u64(const secp256k1_int128 *a) {
-    return a->lo;
-}
 
 static void secp256k1_u128_from_u64(secp256k1_uint128 *r, ulong a) {
-    r->lo = a;
+	r->hi = 0;
+	r->lo = a;
 }
-
-// NEEDS TESTING (check negative)
-static long secp256k1_i128_to_i64(const secp256k1_int128 *a) {
-    return (long)a->lo;
+static void secp256k1_u128_add(secp256k1_uint128 *r, const secp256k1_uint128 *a, const secp256k1_uint128 *b) {
+	r->lo = a->lo + b->lo;
+	r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
 }
-
-static ulong secp256k1_u128_to_u64(const secp256k1_uint128 *a) {
-   return a->lo;
+static void secp256k1_u128_mul(secp256k1_uint128 *r, ulong a, ulong b) {
+	r->lo = (ulong)a * (ulong)b;
+	r->hi = mul_hi(a, b);
 }
-
-// NEEDS TESTING
-static void secp256k1_i128_rshift(secp256k1_int128 *r, unsigned int n) {
-	r->hi >>= n;
-	r->hi |= r->lo << (64 - n);
-	r->lo >>= n;
+static void secp256k1_u128_accum_u64(secp256k1_uint128 *r, ulong a) {
+	r->lo = r->lo + a;
+	r->hi += r->lo < a;
 }
-
-// NEEDS TESTING (check negative)
+static void secp256k1_u128_accum_mul(secp256k1_uint128 *r, ulong a, ulong b) {
+	secp256k1_uint128 ab;
+	secp256k1_u128_mul(&ab, a, b);
+	secp256k1_u128_add(r, r, &ab);
+}
 static void secp256k1_u128_rshift(secp256k1_uint128 *r, unsigned int n) {
-	r->hi >>= n;
-	r->hi |= r->lo << (64 - n);
-	r->lo >>= n;
+	if (n >= 64) {
+		r->lo = r->hi >> (n-64);
+		r->hi = 0;
+	} else if (n > 0) {
+		r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
+		r->hi >>= n;
+	}
 }
-
-// NEEDS TESTING
+static ulong secp256k1_u128_to_u64(const secp256k1_uint128 *a) {
+	return a->lo;
+}
 static ulong secp256k1_u128_hi_u64(const secp256k1_uint128 *a) {
-   return a->hi;
+	return a->hi;
 }
 
+/* signed int128 implementation */
+typedef struct { long hi; ulong lo; } secp256k1_int128;
+
+static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
+	r->lo = a->lo + b->lo;
+	r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
+}
+static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
+	r->lo = (ulong)a * (ulong)b;
+	r->hi = mul_hi(a, b);
+}
+static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
+	secp256k1_int128 ab;
+	secp256k1_i128_mul(&ab, a, b);
+	secp256k1_i128_add(r, r, &ab);
+}
+static void secp256k1_i128_rshift(secp256k1_int128 *r, uint n) {
+	if (n >= 64) {
+		r->lo = (ulong)((long)(r->hi) >> (n-64));
+		r->hi = (ulong)((long)(r->hi) >> 63);
+	} else if (n > 0) {
+		r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
+		r->hi = (ulong)((long)(r->hi) >> n);
+	}
+}
+static ulong secp256k1_i128_to_u64(const secp256k1_int128 *a) {
+	return a->lo;
+}
+static long secp256k1_i128_to_i64(const secp256k1_int128 *a) {
+	return (long)a->lo;
+}
 
 /* A signed 62-bit limb representation of integers. Its value is sum(v[i] * 2^(62*i), i=0..4). */
 typedef struct {
@@ -150,12 +126,13 @@ typedef struct {
     ulong modulus_inv62; /* modulus^{-1} mod 2^62 */
 } secp256k1_modinv64_modinfo;
 __constant secp256k1_modinv64_modinfo secp256k1_const_modinfo_scalar = {
-    {{0x3FD25E8CD0364141LL, 0x2ABB739ABD2280EELL, -0x15LL, 0, 256}},
-    0x34F20099AA774EC1LL
+	{{0x3FD25E8CD0364141LL, 0x2ABB739ABD2280EELL, -0x15LL, 0, 256}},
+	0x34F20099AA774EC1LL
 };
 typedef struct {
     long u, v, q, r;
 } secp256k1_modinv64_trans2x2;
+
 static long secp256k1_modinv64_divsteps_62_var(long eta, ulong f0, ulong g0, secp256k1_modinv64_trans2x2 *t) {
     ulong u = 1, v = 0, q = 0, r = 1;
     ulong f = f0, g = g0, m;
@@ -415,13 +392,6 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, __constant se
 /** This field implementation represents the value as 5 ulong limbs in base
  *  2^52. */
 typedef struct {
-   /* A field element f represents the sum(i=0..4, f.n[i] << (i*52)) mod p,
-    * where p is the field modulus, 2^256 - 2^32 - 977.
-    *
-    * The individual limbs f.n[i] can exceed 2^52; the field's magnitude roughly
-    * corresponds to how much excess is allowed. The value
-    * sum(i=0..4, f.n[i] << (i*52)) may exceed p, unless the field element is
-    * normalized. */
     ulong n[5];
 } secp256k1_fe;
 

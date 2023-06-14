@@ -17,6 +17,6 @@
 
 	<ItemGroup>
 		<EmbeddedResource Include="OpenCL\Kernels\secp256k1_int128_tests.cl" />
-		<EmbeddedResource Include="OpenCL\Kernels\secp256k1_verify.cl" />
+		<EmbeddedResource Include="OpenCL\Kernels\secp256k1_verify2.cl" />
 	</ItemGroup>
 </Project>

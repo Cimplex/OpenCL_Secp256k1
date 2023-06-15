@@ -19,10 +19,10 @@
  * This function is only intended to be used as fallback for
  * secp256k1_ctz64_var, but permits it to be tested separately. */
 __constant uchar debruijn[64] = {
-	0, 1, 2, 53, 3, 7, 54, 27, 4, 38, 41, 8, 34, 55, 48, 28,
-	62, 5, 39, 46, 44, 42, 22, 9, 24, 35, 59, 56, 49, 18, 29, 11,
-	63, 52, 6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
-	51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12
+     0,  1,  2, 53,  3,  7, 54, 27,  4, 38, 41,  8, 34, 55, 48, 28,
+    62,  5, 39, 46, 44, 42, 22,  9, 24, 35, 59, 56, 49, 18, 29, 11,
+    63, 52,  6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
+    51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12
 };
 static int secp256k1_ctz64_var_debruijn(ulong x) {
     return debruijn[(ulong)((x & -x) * 0x022FDD63CC95386DUL) >> 58];
@@ -30,108 +30,102 @@ static int secp256k1_ctz64_var_debruijn(ulong x) {
 
 /** The number of entries a table with precomputed multiples needs to have. */
 static long ECMULT_TABLE_SIZE(int w) {
-	return (1L << ((w)-2));
+    return (1L << ((w)-2));
 }
 
-/** Larger values for ECMULT_WINDOW_SIZE result in possibly better
- *  performance at the cost of an exponentially larger precomputed
+/** Larger values for ECMULT_WINDOW_SIZE result in possibly better performance at the cost of an exponentially larger precomputed
  *  table. The exact table size is
  *      (1 << (WINDOW_G - 2)) * sizeof(secp256k1_ge_storage)  bytes,
- *  where sizeof(secp256k1_ge_storage) is typically 64 bytes but can
- *  be larger due to platform-specific padding and alignment.
- *  Two tables of this size are used (due to the endomorphism
- *  optimization).                                                    */
+ *
+ *  where sizeof(secp256k1_ge_storage) is typically 64 bytes but can be larger due to platform-specific padding and alignment.
+ *  Two tables of this size are used (due to the endomorphism optimization).
+ */
+#define WINDOW_G 5
 #define WINDOW_A 5
-#define WINDOW_G 15
 
 /* unsigned int128 implementation */
 typedef struct { ulong hi; ulong lo; } secp256k1_uint128;
 
 static void secp256k1_u128_from_u64(secp256k1_uint128 *r, ulong a) {
-	r->hi = 0;
-	r->lo = a;
+    r->hi = 0;
+    r->lo = a;
 }
 static void secp256k1_u128_add(secp256k1_uint128 *r, const secp256k1_uint128 *a, const secp256k1_uint128 *b) {
-	r->lo = a->lo + b->lo;
-	r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
+    r->lo = a->lo + b->lo;
+    r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
 }
 static void secp256k1_u128_mul(secp256k1_uint128 *r, ulong a, ulong b) {
-	r->lo = (ulong)a * (ulong)b;
-	r->hi = mul_hi(a, b);
+    r->lo = (ulong)a * (ulong)b;
+    r->hi = mul_hi(a, b);
 }
 static void secp256k1_u128_accum_u64(secp256k1_uint128 *r, ulong a) {
-	r->lo = r->lo + a;
-	r->hi += r->lo < a;
+    r->lo = r->lo + a;
+    r->hi += r->lo < a;
 }
 static void secp256k1_u128_accum_mul(secp256k1_uint128 *r, ulong a, ulong b) {
-	secp256k1_uint128 ab;
-	secp256k1_u128_mul(&ab, a, b);
-	secp256k1_u128_add(r, r, &ab);
+    secp256k1_uint128 ab;
+    secp256k1_u128_mul(&ab, a, b);
+    secp256k1_u128_add(r, r, &ab);
 }
 static void secp256k1_u128_rshift(secp256k1_uint128 *r, unsigned int n) {
-	if (n >= 64) {
-		r->lo = r->hi >> (n-64);
-		r->hi = 0;
-	} else if (n > 0) {
-		r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
-		r->hi >>= n;
-	}
+    if (n >= 64) {
+        r->lo = r->hi >> (n-64);
+        r->hi = 0;
+    } else if (n > 0) {
+        r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
+        r->hi >>= n;
+    }
 }
 static ulong secp256k1_u128_to_u64(const secp256k1_uint128 *a) {
-	return a->lo;
+    return a->lo;
 }
 static ulong secp256k1_u128_hi_u64(const secp256k1_uint128 *a) {
-	return a->hi;
+    return a->hi;
 }
 
 /* signed int128 implementation */
 typedef struct { long hi; ulong lo; } secp256k1_int128;
 
 static void secp256k1_i128_add(secp256k1_int128 *r, const secp256k1_int128 *a, const secp256k1_int128 *b) {
-	r->lo = a->lo + b->lo;
-	r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
+    r->lo = a->lo + b->lo;
+    r->hi = a->hi + b->hi + (r->lo < a->lo || r->lo < b->lo);
 }
 static void secp256k1_i128_mul(secp256k1_int128 *r, long a, long b) {
-	r->lo = (ulong)a * (ulong)b;
-	r->hi = mul_hi(a, b);
+    r->lo = (ulong)a * (ulong)b;
+    r->hi = mul_hi(a, b);
 }
 static void secp256k1_i128_accum_mul(secp256k1_int128 *r, long a, long b) {
-	secp256k1_int128 ab;
-	secp256k1_i128_mul(&ab, a, b);
-	secp256k1_i128_add(r, r, &ab);
+    secp256k1_int128 ab;
+    secp256k1_i128_mul(&ab, a, b);
+    secp256k1_i128_add(r, r, &ab);
 }
 static void secp256k1_i128_rshift(secp256k1_int128 *r, uint n) {
-	if (n >= 64) {
-		r->lo = (ulong)((long)(r->hi) >> (n-64));
-		r->hi = (ulong)((long)(r->hi) >> 63);
-	} else if (n > 0) {
-		r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
-		r->hi = (ulong)((long)(r->hi) >> n);
-	}
+    if (n >= 64) {
+        r->lo = (ulong)((long)(r->hi) >> (n-64));
+        r->hi = (ulong)((long)(r->hi) >> 63);
+    } else if (n > 0) {
+        r->lo = ((1U * r->hi) << (64-n)) | r->lo >> n;
+        r->hi = (ulong)((long)(r->hi) >> n);
+    }
 }
 static ulong secp256k1_i128_to_u64(const secp256k1_int128 *a) {
-	return a->lo;
+    return a->lo;
 }
 static long secp256k1_i128_to_i64(const secp256k1_int128 *a) {
-	return (long)a->lo;
+    return (long)a->lo;
 }
 
 /* A signed 62-bit limb representation of integers. Its value is sum(v[i] * 2^(62*i), i=0..4). */
-typedef struct {
-    long v[5];
-} secp256k1_modinv64_signed62;
+typedef struct { long v[5]; } secp256k1_modinv64_signed62;
 typedef struct {
     /* The modulus in signed62 notation, must be odd and in [3, 2^256]. */
     secp256k1_modinv64_signed62 modulus;
     ulong modulus_inv62; /* modulus^{-1} mod 2^62 */
 } secp256k1_modinv64_modinfo;
-__constant secp256k1_modinv64_modinfo secp256k1_const_modinfo_scalar = {
-	{{0x3FD25E8CD0364141LL, 0x2ABB739ABD2280EELL, -0x15LL, 0, 256}},
-	0x34F20099AA774EC1LL
-};
-typedef struct {
-    long u, v, q, r;
-} secp256k1_modinv64_trans2x2;
+
+__constant secp256k1_modinv64_modinfo secp256k1_const_modinfo_scalar = {{{ 0x3FD25E8CD0364141L, 0x2ABB739ABD2280EEL, -0x15LL, 0, 256 }}, 0x34F20099AA774EC1L };
+
+typedef struct { long u, v, q, r; } secp256k1_modinv64_trans2x2;
 
 static long secp256k1_modinv64_divsteps_62_var(long eta, ulong f0, ulong g0, secp256k1_modinv64_trans2x2 *t) {
     ulong u = 1, v = 0, q = 0, r = 1;
@@ -293,8 +287,8 @@ static void secp256k1_modinv64_normalize_62(secp256k1_modinv64_signed62 *r, long
     const long M62 = (long)(ULONG_MAX >> 2);
     long r0 = r->v[0], r1 = r->v[1], r2 = r->v[2], r3 = r->v[3], r4 = r->v[4];
     
-	// NEEDS TESTING, remove volatile keyword
-	long cond_add, cond_negate;
+    // NEEDS TESTING, remove volatile keyword
+    long cond_add, cond_negate;
 
     /* In a first step, add the modulus if the input is negative, and then negate if requested.
      * This brings r from range (-2*modulus,modulus) to range (-modulus,modulus). As all input
@@ -389,16 +383,13 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, __constant se
     *x = d;
 }
 
-/** This field implementation represents the value as 5 ulong limbs in base
- *  2^52. */
-typedef struct {
-    ulong n[5];
-} secp256k1_fe;
+/** This field implementation represents the value as 5 ulong limbs in base 2^52. */
+typedef struct { ulong n[5]; } secp256k1_fe;
 
-// NEEDS TESTING - Check the constant (added leading 0)
-__constant secp256k1_fe const_beta = {{ 0, 0x7AE96A2B657C0710UL, 0x6E64479EAC3434E9UL, 0x9CF0497512F58995UL, 0xC1396C28719501EEUL }};
-__constant secp256k1_fe secp256k1_ecdsa_const_p_minus_order = {{ 0, 0, 1, 0x4551231950B75FC4UL, 0x402DA1722FC9BAEEUL }};
-__constant secp256k1_fe secp256k1_ecdsa_const_order_as_fe = {{ 0, 0xFFFFFFFFFFFFFFFFUL, 0xFFFFFFFFFFFFFFFEUL, 0xBAAEDCE6AF48A03BUL, 0xBFD25E8CD0364141UL }};
+__constant secp256k1_fe const_b = {{ 0x00096c28719501eeUL, 0x0007512f58995c13UL, 0x000c3434e99cf049UL, 0x00007106e64479eaUL, 0x00007ae96a2b657cUL }};
+__constant secp256k1_fe const_p = {{ 0x000da1722fc9baeeUL, 0x0001950b75fc4402UL, 0x0000000001455123UL, 0x0000000000000000UL, 0x0000000000000000UL }};
+__constant secp256k1_fe const_n = {{ 0x00025e8cd0364141UL, 0x000e6af48a03bbfdUL, 0x000ffffffebaaedcUL, 0x000fffffffffffffUL, 0x0000ffffffffffffUL }};
+
 typedef struct {
     secp256k1_fe x;
     secp256k1_fe y;
@@ -416,10 +407,74 @@ typedef struct {
     secp256k1_fe_storage y;
 } secp256k1_ge_storage;
 
-// Have to hardcode size
-//__constant secp256k1_ge_storage secp256k1_pre_g[ECMULT_TABLE_SIZE(WINDOW_G)];
-__constant secp256k1_ge_storage secp256k1_pre_g[8192];
-__constant secp256k1_ge_storage secp256k1_pre_g_128[8192];
+__constant secp256k1_ge_storage secp256k1_pre_g[8] = {
+    {
+        .x = {{ 0x59f2815b16f81798UL, 0x029bfcdb2dce28d9UL, 0x55a06295ce870b07UL, 0x79be667ef9dcbbacUL }},
+        .y = {{ 0x9c47d08ffb10d4b8UL, 0xfd17b448a6855419UL, 0x5da4fbfc0e1108a8UL, 0x483ada7726a3c465UL }}
+    },
+    {
+        .x = {{ 0x8601f113bce036f9UL, 0xb531c845836f99b0UL, 0x49344f85f89d5229UL, 0xf9308a019258c310UL }},
+        .y = {{ 0x6cb9fd7584b8e672UL, 0x6500a99934c2231bUL, 0x0fe337e62a37f356UL, 0x388f7b0f632de814UL }}
+    },
+    {
+        .x = {{ 0xcba8d569b240efe4UL, 0xe88b84bddc619ab7UL, 0x55b4a7250a5c5128UL, 0x2f8bde4d1a072093UL }},
+        .y = {{ 0xdca87d3aa6ac62d6UL, 0xf788271bab0d6840UL, 0xd4dba9dda6c9c426UL, 0xd8ac222636e5e3d6UL }}
+    },
+    {
+        .x = {{ 0xe92bddedcac4f9bcUL, 0x3d419b7e0330e39cUL, 0xa398f365f2ea7a0eUL, 0x5cbdf0646e5db4eaUL }},
+        .y = {{ 0xa5082628087264daUL, 0xa813d0b813fde7b5UL, 0xa3178d6d861a54dbUL, 0x6aebca40ba255960UL }}
+    },
+    {
+        .x = {{ 0xc35f110dfc27ccbeUL, 0xe09796974c57e714UL, 0x09ad178a9f559abdUL, 0xacd484e2f0c7f653UL }},
+        .y = {{ 0x05cc262ac64f9c37UL, 0xadd888a4375f8e0fUL, 0x64380971763b61e9UL, 0xcc338921b0a7d9fdUL }}
+    },
+    {
+        .x = {{ 0xbbec17895da008cbUL, 0x5649980be5c17891UL, 0x5ef4246b70c65aacUL, 0x774ae7f858a9411eUL }},
+        .y = {{ 0x301d74c9c953c61bUL, 0x372db1e2dff9d6a8UL, 0x0243dd56d7b7b365UL, 0xd984a032eb6b5e19UL }}
+    },
+    {
+        .x = {{ 0xdeeddf8f19405aa8UL, 0xb075fbc6610e58cdUL, 0xc7d1d205c3748651UL, 0xf28773c2d975288bUL }},
+        .y = {{ 0x29b5cb52db03ed81UL, 0x3a1a06da521fa91fUL, 0x758212eb65cdaf47UL, 0x0ab0902e8d880a89UL }}
+    },
+    {
+        .x = {{ 0x44adbcf8e27e080eUL, 0x31e5946f3c85f79eUL, 0x5a465ae3095ff411UL, 0xd7924d4f7d43ea96UL }},
+        .y = {{ 0xf6a26b58c504dc9fUL, 0xea40af2bd896d3a5UL, 0x83842ec228cc6defUL, 0x581e2872a86c72a6UL }}
+    }
+};
+__constant secp256k1_ge_storage secp256k1_pre_g_128[8] = {
+    {
+        .x = {{ 0x1b7b444c9ec4c0daUL, 0xe88c5678723ea335UL, 0x9239c1ad981f162eUL, 0x8f68b9d2f63b5f33UL }},
+        .y = {{ 0xf23cbf79501fff82UL, 0xbbea2cfe95510bfdUL, 0xde1d90c2b6be215dUL, 0x662a9f2dba063986UL }}
+    },
+    {
+        .x = {{ 0x18e2b8edd23809faUL, 0xfd845cb351d954beUL, 0x8ba93363f2451f08UL, 0x38381dbe2e509f22UL }},
+        .y = {{ 0x331fed52bd707518UL, 0x3681fccb32d8f24dUL, 0xb09405a5520eb1ccUL, 0xe4a32d0a0fb917dcUL }}
+    },
+    {
+        .x = {{ 0x3ea4264897c2a310UL, 0xf186aea540122630UL, 0xf6921b82aa4699a1UL, 0x49262724e4372ae6UL }},
+        .y = {{ 0x5e27ded00c41b681UL, 0xa75ff8ce6d163612UL, 0x9714303b5a2cfa56UL, 0x1337e773bca7abf9UL }}
+    },
+    {
+        .x = {{ 0x1384b079cebd2d31UL, 0x4dcc1a56ff06db8dUL, 0xd5e253b3e477e2f8UL, 0xe306568c1a240c90UL }},
+        .y = {{ 0x92546e44be373826UL, 0xffbc8042692b4083UL, 0x888f2b107f7d0db6UL, 0x0eac6fe378934260UL }}
+    },
+    {
+        .x = {{ 0xc530c39e363136b0UL, 0x74ebf8d9aab41dd9UL, 0x271b0e7623fbd633UL, 0x3b9e100e2428cefcUL }},
+        .y = {{ 0x6cdbbc8a953ec16fUL, 0x3ad31f81a2ae28a3UL, 0xdf1533eb8f475b26UL, 0xfafb98152d16bb71UL }}
+    },
+    {
+        .x = {{ 0x9608f0472f485d3fUL, 0x17ca07688107beeeUL, 0x2b76ca80f5dedef7UL, 0xbb0aad49712ac9a9UL }},
+        .y = {{ 0x3ca2f975e7939250UL, 0x31670bff895a5afaUL, 0x8ecd201f7297da34UL, 0xea699c53c5835479UL }}
+    },
+    {
+        .x = {{ 0x4aeed33a36718dc9UL, 0xe1e58b4db01123deUL, 0xd4e8eb197afe0113UL, 0x79090ac8e4eefcc0UL }},
+        .y = {{ 0x1cfae7c5963322b1UL, 0x0ba9008bdd36afb7UL, 0xcd9aaa5613d816cbUL, 0xeaab722b91905b8fUL }}
+    },
+    {
+        .x = {{ 0xa269694c7f60c7d1UL, 0x8dd71de7cd775ad2UL, 0x1c03dbbce549ba66UL, 0xe77c81ade9f97b55UL }},
+        .y = {{ 0x82d724494ec581f2UL, 0x1c2986d3631470f7UL, 0xc5fc3b323ea81543UL, 0x3acf1478eef81321UL }}
+    }
+};
 
 static void secp256k1_fe_set_int(secp256k1_fe *r, int a) {
     r->n[0] = a;
@@ -502,76 +557,48 @@ static void secp256k1_fe_sqr_inner(ulong *r, const ulong *a) {
     long t3, t4, tx, u0;
     const ulong M = 0xFFFFFFFFFFFFFUL, R = 0x1000003D10UL;
 
-    /**  [... a b c] is a shorthand for ... + a<<104 + b<<52 + c<<0 mod n.
-     *  px is a shorthand for sum(a[i]*a[x-i], i=0..x).
-     *  Note that [x 0 0 0 0 0] = [x*R].
-     */
-
     secp256k1_u128_mul(&d, a0*2, a3);
     secp256k1_u128_accum_mul(&d, a1*2, a2);
-    /* [d 0 0 0] = [p3 0 0 0] */
+
     secp256k1_u128_mul(&c, a4, a4);
-    /* [c 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
     secp256k1_u128_accum_mul(&d, R, secp256k1_u128_to_u64(&c)); secp256k1_u128_rshift(&c, 64);
-    /* [(c<<12) 0 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
     t3 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
 
     a4 *= 2;
     secp256k1_u128_accum_mul(&d, a0, a4);
     secp256k1_u128_accum_mul(&d, a1*2, a3);
     secp256k1_u128_accum_mul(&d, a2, a2);
-    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+
     secp256k1_u128_accum_mul(&d, R << 12, secp256k1_u128_to_u64(&c));
-    /* [d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
     t4 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [d t4 t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
     tx = (t4 >> 48); t4 &= (M >> 4);
-    /* [d t4+(tx<<48) t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
 
     secp256k1_u128_mul(&c, a0, a0);
-    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 0 p4 p3 0 0 p0] */
     secp256k1_u128_accum_mul(&d, a1, a4);
     secp256k1_u128_accum_mul(&d, a2*2, a3);
-    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+
     u0 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [d u0 t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
-    /* [d 0 t4+(tx<<48)+(u0<<52) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
     u0 = (u0 << 4) | tx;
-    /* [d 0 t4+(u0<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
     secp256k1_u128_accum_mul(&c, u0, R >> 4);
-    /* [d 0 t4 t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
     r[0] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 0 p0] */
 
     a0 *= 2;
     secp256k1_u128_accum_mul(&c, a0, a1);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 p1 p0] */
     secp256k1_u128_accum_mul(&d, a2, a4);
     secp256k1_u128_accum_mul(&d, a3, a3);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
     secp256k1_u128_accum_mul(&c, secp256k1_u128_to_u64(&d) & M, R); secp256k1_u128_rshift(&d, 52);
-    /* [d 0 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
     r[1] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
 
     secp256k1_u128_accum_mul(&c, a0, a2);
     secp256k1_u128_accum_mul(&c, a1, a1);
-    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 p2 p1 p0] */
     secp256k1_u128_accum_mul(&d, a3, a4);
-    /* [d 0 0 t4 t3 c r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     secp256k1_u128_accum_mul(&c, R, secp256k1_u128_to_u64(&d)); secp256k1_u128_rshift(&d, 64);
-    /* [(d<<12) 0 0 0 t4 t3 c r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     r[2] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [(d<<12) 0 0 0 t4 t3+c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
 
     secp256k1_u128_accum_mul(&c, R << 12, secp256k1_u128_to_u64(&d));
     secp256k1_u128_accum_u64(&c, t3);
-    /* [t4 c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     r[3] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [t4+c r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     r[4] = secp256k1_u128_to_u64(&c) + t4;
-    /* [r4 r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
 }
 static void secp256k1_fe_sqr(secp256k1_fe *r, const secp256k1_fe *a) {
     secp256k1_fe_sqr_inner(r->n, a->n);
@@ -582,85 +609,64 @@ static void secp256k1_fe_mul_inner(ulong *r, const ulong *a, const ulong *b) {
     ulong a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3], a4 = a[4];
     const ulong M = 0xFFFFFFFFFFFFFUL, R = 0x1000003D10UL;
 
-    /*  [... a b c] is a shorthand for ... + a<<104 + b<<52 + c<<0 mod n.
-     *  for 0 <= x <= 4, px is a shorthand for sum(a[i]*b[x-i], i=0..x).
-     *  for 4 <= x <= 8, px is a shorthand for sum(a[i]*b[x-i], i=(x-4)..4)
-     *  Note that [x 0 0 0 0 0] = [x*R].
-     */
-
     secp256k1_u128_mul(&d, a0, b[3]);
     secp256k1_u128_accum_mul(&d, a1, b[2]);
     secp256k1_u128_accum_mul(&d, a2, b[1]);
     secp256k1_u128_accum_mul(&d, a3, b[0]);
-    /* [d 0 0 0] = [p3 0 0 0] */
+
     secp256k1_u128_mul(&c, a4, b[4]);
-    /* [c 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
     secp256k1_u128_accum_mul(&d, R, secp256k1_u128_to_u64(&c)); secp256k1_u128_rshift(&c, 64);
-    /* [(c<<12) 0 0 0 0 0 d 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
+    
     t3 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 0 p3 0 0 0] */
 
     secp256k1_u128_accum_mul(&d, a0, b[4]);
     secp256k1_u128_accum_mul(&d, a1, b[3]);
     secp256k1_u128_accum_mul(&d, a2, b[2]);
     secp256k1_u128_accum_mul(&d, a3, b[1]);
     secp256k1_u128_accum_mul(&d, a4, b[0]);
-    /* [(c<<12) 0 0 0 0 d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+
     secp256k1_u128_accum_mul(&d, R << 12, secp256k1_u128_to_u64(&c));
-    /* [d t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
+    
     t4 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [d t4 t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
     tx = (t4 >> 48); t4 &= (M >> 4);
-    /* [d t4+(tx<<48) t3 0 0 0] = [p8 0 0 0 p4 p3 0 0 0] */
 
     secp256k1_u128_mul(&c, a0, b[0]);
-    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 0 p4 p3 0 0 p0] */
     secp256k1_u128_accum_mul(&d, a1, b[4]);
     secp256k1_u128_accum_mul(&d, a2, b[3]);
     secp256k1_u128_accum_mul(&d, a3, b[2]);
     secp256k1_u128_accum_mul(&d, a4, b[1]);
-    /* [d t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+
     u0 = secp256k1_u128_to_u64(&d) & M; secp256k1_u128_rshift(&d, 52);
-    /* [d u0 t4+(tx<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
-    /* [d 0 t4+(tx<<48)+(u0<<52) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
     u0 = (u0 << 4) | tx;
-    /* [d 0 t4+(u0<<48) t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    
     secp256k1_u128_accum_mul(&c, u0, R >> 4);
-    /* [d 0 t4 t3 0 0 c] = [p8 0 0 p5 p4 p3 0 0 p0] */
+    
     r[0] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 0 p0] */
 
     secp256k1_u128_accum_mul(&c, a0, b[1]);
     secp256k1_u128_accum_mul(&c, a1, b[0]);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 0 p5 p4 p3 0 p1 p0] */
     secp256k1_u128_accum_mul(&d, a2, b[4]);
     secp256k1_u128_accum_mul(&d, a3, b[3]);
     secp256k1_u128_accum_mul(&d, a4, b[2]);
-    /* [d 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
+    
     secp256k1_u128_accum_mul(&c, secp256k1_u128_to_u64(&d) & M, R); secp256k1_u128_rshift(&d, 52);
-    /* [d 0 0 t4 t3 0 c r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
+    
     r[1] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 0 p1 p0] */
 
     secp256k1_u128_accum_mul(&c, a0, b[2]);
     secp256k1_u128_accum_mul(&c, a1, b[1]);
     secp256k1_u128_accum_mul(&c, a2, b[0]);
-    /* [d 0 0 t4 t3 c r1 r0] = [p8 0 p6 p5 p4 p3 p2 p1 p0] */
     secp256k1_u128_accum_mul(&d, a3, b[4]);
     secp256k1_u128_accum_mul(&d, a4, b[3]);
-    /* [d 0 0 t4 t3 c t1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     secp256k1_u128_accum_mul(&c, R, secp256k1_u128_to_u64(&d)); secp256k1_u128_rshift(&d, 64);
-    /* [(d<<12) 0 0 0 t4 t3 c r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
 
     r[2] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [(d<<12) 0 0 0 t4 t3+c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    
     secp256k1_u128_accum_mul(&c, R << 12, secp256k1_u128_to_u64(&d));
     secp256k1_u128_accum_u64(&c, t3);
-    /* [t4 c r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
+    
     r[3] = secp256k1_u128_to_u64(&c) & M; secp256k1_u128_rshift(&c, 52);
-    /* [t4+c r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
     r[4] = secp256k1_u128_to_u64(&c) + t4;
-    /* [r4 r3 r2 r1 r0] = [p8 p7 p6 p5 p4 p3 p2 p1 p0] */
 }
 static void secp256k1_fe_mul(secp256k1_fe *r, const secp256k1_fe *a, const secp256k1_fe *b) {
     secp256k1_fe_mul_inner(r->n, a->n, b->n);
@@ -768,7 +774,7 @@ static void secp256k1_fe_normalize_weak(secp256k1_fe *r) {
     ulong x = t4>>48; t4 &= 0x0FFFFFFFFFFFFUL;
 
     /* The first pass ensures the magnitude is 1, ... */
-    t0 += x * 0x1000003D1ULL;
+    t0 += x * 0x1000003D1UL;
     t1 += (t0 >> 52); t0 &= 0xFFFFFFFFFFFFFUL;
     t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFUL;
     t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFUL;
@@ -795,7 +801,7 @@ static int secp256k1_fe_normalizes_to_zero_var(const secp256k1_fe *r) {
     z1 = z0 ^ 0x1000003D0UL;
 
     /* Fast return path should catch the majority of cases */
-    if ((z0 != 0ULL) & (z1 != 0xFFFFFFFFFFFFFUL)) {
+    if ((z0 != 0UL) & (z1 != 0xFFFFFFFFFFFFFUL)) {
         return 0;
     }
 
@@ -809,7 +815,7 @@ static int secp256k1_fe_normalizes_to_zero_var(const secp256k1_fe *r) {
     t2 += (t1 >> 52); t1 &= 0xFFFFFFFFFFFFFUL; z0 |= t1; z1 &= t1;
     t3 += (t2 >> 52); t2 &= 0xFFFFFFFFFFFFFUL; z0 |= t2; z1 &= t2;
     t4 += (t3 >> 52); t3 &= 0xFFFFFFFFFFFFFUL; z0 |= t3; z1 &= t3;
-                                                z0 |= t4; z1 &= t4 ^ 0xF000000000000UL;
+                                               z0 |= t4; z1 &= t4 ^ 0xF000000000000UL;
 
     return (z0 == 0) | (z1 == 0xFFFFFFFFFFFFFUL);
 }
@@ -818,55 +824,19 @@ static void secp256k1_fe_half(secp256k1_fe *r) {
     ulong one = (ulong)1;
     ulong mask = -(t0 & one) >> 12;
 
-    /* Bounds analysis (over the rationals).
-     *
-     * Let m = r->magnitude
-     *     C = 0xFFFFFFFFFFFFFULL * 2
-     *     D = 0x0FFFFFFFFFFFFULL * 2
-     *
-     * Initial bounds: t0..t3 <= C * m
-     *                     t4 <= D * m
-     */
-
     t0 += 0xFFFFEFFFFFC2FUL & mask;
     t1 += mask;
     t2 += mask;
     t3 += mask;
     t4 += mask >> 4;
 
-    /* t0..t3: added <= C/2
-     *     t4: added <= D/2
-     *
-     * Current bounds: t0..t3 <= C * (m + 1/2)
-     *                     t4 <= D * (m + 1/2)
-     */
-
     r->n[0] = (t0 >> 1) + ((t1 & one) << 51);
     r->n[1] = (t1 >> 1) + ((t2 & one) << 51);
     r->n[2] = (t2 >> 1) + ((t3 & one) << 51);
     r->n[3] = (t3 >> 1) + ((t4 & one) << 51);
     r->n[4] = (t4 >> 1);
-
-    /* t0..t3: shifted right and added <= C/4 + 1/2
-     *     t4: shifted right
-     *
-     * Current bounds: t0..t3 <= C * (m/2 + 1/2)
-     *                     t4 <= D * (m/2 + 1/4)
-     *
-     * Therefore the output magnitude (M) has to be set such that:
-     *     t0..t3: C * M >= C * (m/2 + 1/2)
-     *         t4: D * M >= D * (m/2 + 1/4)
-     *
-     * It suffices for all limbs that, for any input magnitude m:
-     *     M >= m/2 + 1/2
-     *
-     * and since we want the smallest such integer value for M:
-     *     M == floor(m/2) + 1
-     */
 }
 static void secp256k1_fe_negate(secp256k1_fe *r, const secp256k1_fe *a, int m) {
-    /* Due to the properties above, the left hand in the subtractions below is never less than
-     * the right hand. */
     r->n[0] = 0xFFFFEFFFFFC2FUL * 2 * (m + 1) - a->n[0];
     r->n[1] = 0xFFFFFFFFFFFFFUL * 2 * (m + 1) - a->n[1];
     r->n[2] = 0xFFFFFFFFFFFFFUL * 2 * (m + 1) - a->n[2];
@@ -980,7 +950,6 @@ static void secp256k1_gej_rescale(secp256k1_gej *r, const secp256k1_fe *s) {
     secp256k1_fe_mul(&r->z, &r->z, s);    // r->z *= s
 }
 static void secp256k1_gej_double(secp256k1_gej *r, const secp256k1_gej *a) {
-    /* Operations: 3 mul, 4 sqr, 8 add/half/mul_int/negate */
     secp256k1_fe l, s, t;
 
     r->infinity = a->infinity;
@@ -1164,41 +1133,41 @@ static int secp256k1_gej_eq_x_var(const secp256k1_fe *x, const secp256k1_gej *a)
 
 /** Mathmatical functions for secp256k1_scalar_mul_512 and secp256k1_scalar_reduce_512. */
 static void muladd_fast(ulong a, ulong b, ulong *c0, ulong *c1) {
-	secp256k1_uint128 t;
-	secp256k1_u128_mul(&t, a, b);
-	*c0 += t.lo;           /* overflow is handled on the next line */
-	t.hi += (*c0 < t.lo);  /* at most 0xFFFFFFFFFFFFFFFF */
+    secp256k1_uint128 t;
+    secp256k1_u128_mul(&t, a, b);
+    *c0 += t.lo;           /* overflow is handled on the next line */
+    t.hi += (*c0 < t.lo);  /* at most 0xFFFFFFFFFFFFFFFF */
     *c1 += t.hi;           /* never overflows by contract */
 }
 static void muladd(ulong a, ulong b, ulong *c0, ulong *c1, uint *c2) {
-	secp256k1_uint128 t;
-	secp256k1_u128_mul(&t, a, b);
-	*c0 += t.lo;           // overflow is handled on the next line
-	t.hi += (*c0 < t.lo);  // at most 0xFFFFFFFFFFFFFFFF
-	*c1 += t.hi;           // overflow is handled on the next line
-	*c2 += (*c1 < t.hi);   // never overflows by contract
+    secp256k1_uint128 t;
+    secp256k1_u128_mul(&t, a, b);
+    *c0 += t.lo;           // overflow is handled on the next line
+    t.hi += (*c0 < t.lo);  // at most 0xFFFFFFFFFFFFFFFF
+    *c1 += t.hi;           // overflow is handled on the next line
+    *c2 += (*c1 < t.hi);   // never overflows by contract
 }
 static void muladd_ulong(ulong a, ulong b, ulong *c0, ulong *c1, ulong *c2) {
-	secp256k1_uint128 t;
-	secp256k1_u128_mul(&t, a, b);
-	*c0 += t.lo;           // overflow is handled on the next line
-	t.hi += (*c0 < t.lo);  // at most 0xFFFFFFFFFFFFFFFF
-	*c1 += t.hi;           // overflow is handled on the next line
-	*c2 += (*c1 < t.hi);   // never overflows by contract
+    secp256k1_uint128 t;
+    secp256k1_u128_mul(&t, a, b);
+    *c0 += t.lo;           // overflow is handled on the next line
+    t.hi += (*c0 < t.lo);  // at most 0xFFFFFFFFFFFFFFFF
+    *c1 += t.hi;           // overflow is handled on the next line
+    *c2 += (*c1 < t.hi);   // never overflows by contract
 }
 static void extract_fast(ulong *n, ulong *c0, ulong *c1) {
-	*n = *c0;
+    *n = *c0;
     *c0 = *c1;
     *c1 = 0;
 }
 static void extract(ulong *n, ulong *c0, ulong *c1, uint *c2) {
-	*n = *c0;
+    *n = *c0;
     *c0 = *c1;
     *c1 = *c2;
     *c2 = 0;
 }
 static void extract_ulong(ulong *n, ulong *c0, ulong *c1, ulong *c2) {
-	*n = *c0;
+    *n = *c0;
     *c0 = *c1;
     *c1 = *c2;
     *c2 = 0;
@@ -1217,11 +1186,13 @@ static void sumadd_fast(ulong a, ulong *c0, ulong *c1) {
 
 /** A scalar modulo the group order of the secp256k1 curve. */
 typedef struct { ulong d[4]; } secp256k1_scalar;
-__constant secp256k1_scalar const_minus_b1 = {{ 0x6F547FA90ABFE4C3UL, 0xE4437ED6010E8828UL, 0x0000000000000000UL, 0x0000000000000000UL }};
-__constant secp256k1_scalar const_minus_b2 = {{ 0xFFFFFFFFFFFFFFFFUL, 0xFFFFFFFFFFFFFFFFUL, 0x8A280AC50774346DUL, 0xD765CDA83DB1562CUL }};
-__constant secp256k1_scalar const_g1       = {{ 0x3086D221A7D46BCDUL, 0xE86C90E49284EB15UL, 0x3DAA8A1471E8CA7FUL, 0xE893209A45DBB031UL }};
-__constant secp256k1_scalar const_g2       = {{ 0xE4437ED6010E8828UL, 0x6F547FA90ABFE4C4UL, 0x221208AC9DF506C6UL, 0x1571B4AE8AC47F71UL }};
-__constant secp256k1_scalar const_lambda   = {{ 0x5363AD4CC05C30E0UL, 0xA5261C028812645AUL, 0x122E22EA20816678UL, 0xDF02967C1B23BD72UL }};
+
+__constant secp256k1_scalar const_minus_b1   = {{ 0x6f547fa90abfe4c3UL, 0xe4437ed6010e8828UL, 0x0000000000000000UL, 0x0000000000000000UL }};
+__constant secp256k1_scalar const_minus_b2   = {{ 0xd765cda83db1562cUL, 0x8a280ac50774346dUL, 0xfffffffffffffffeUL, 0xffffffffffffffffUL }};
+__constant secp256k1_scalar const_g1         = {{ 0xe893209a45dbb031UL, 0x3daa8a1471e8ca7fUL, 0xe86c90e49284eb15UL, 0x3086d221a7d46bcdUL }};
+__constant secp256k1_scalar const_g2         = {{ 0x1571b4ae8ac47f71UL, 0x221208ac9df506c6UL, 0x6f547fa90abfe4c4UL, 0xe4437ed6010e8828UL }};
+__constant secp256k1_scalar const_lambda     = {{ 0xdf02967c1b23bd72UL, 0x122e22ea20816678UL, 0xa5261c028812645aUL, 0x5363ad4cc05c30e0UL }};
+
 static int secp256k1_scalar_check_overflow(const secp256k1_scalar *a) {
     int yes = 0;
     int no = 0;
@@ -1247,94 +1218,58 @@ static int secp256k1_scalar_is_high(const secp256k1_scalar *a) {
 static int secp256k1_scalar_is_zero(const secp256k1_scalar *a) {
     return (a->d[0] | a->d[1] | a->d[2] | a->d[3]) == 0;
 }
-// NEEDS TESTING - Redo this garbage
 static int secp256k1_scalar_reduce(secp256k1_scalar *r, unsigned int overflow) {
     secp256k1_uint128 t;
-
-    //secp256k1_u128_from_u64(&t, r->d[0]);
-	t.lo = r->d[0];
-    
-	//secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_0);
-	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_0);
- 
-	//r->d[0] = secp256k1_u128_to_u64(&t);
-	r->d[0] = t.lo;
-	
-	//secp256k1_u128_rshift(&t, 64);
-    t.lo = t.hi;
-	t.hi = 0;
-	
-	//secp256k1_u128_accum_u64(&t, r->d[1]);
-	secp256k1_u128_accum_u64(&t, r->d[1]);
-
-    //secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_1);
-	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_1);
-    
-	//r->d[1] = secp256k1_u128_to_u64(&t);
-	r->d[1] = t.lo;
-
-	// secp256k1_u128_rshift(&t, 64);
-	t.lo = t.hi;
-	t.hi = 0;
-
-    //secp256k1_u128_accum_u64(&t, r->d[2]);
-	secp256k1_u128_accum_u64(&t, r->d[2]);
-
-    //secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_2);
-	secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_2);
-
-    //r->d[2] = secp256k1_u128_to_u64(&t);
-	r->d[2] = t.lo;
-
-	//secp256k1_u128_rshift(&t, 64);
-	t.lo = t.hi;
-	t.hi = 0;
-    
-	//secp256k1_u128_accum_u64(&t, r->d[3]);
-	secp256k1_u128_accum_u64(&t, r->d[3]);
-
-    //r->d[3] = secp256k1_u128_to_u64(&t);
-    r->d[3] = t.lo;
-
-	return overflow;
+    secp256k1_u128_from_u64(&t, r->d[0]);
+    secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_0);
+    r->d[0] = secp256k1_u128_to_u64(&t); secp256k1_u128_rshift(&t, 64);
+    secp256k1_u128_accum_u64(&t, r->d[1]);
+    secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_1);
+    r->d[1] = secp256k1_u128_to_u64(&t); secp256k1_u128_rshift(&t, 64);
+    secp256k1_u128_accum_u64(&t, r->d[2]);
+    secp256k1_u128_accum_u64(&t, overflow * SECP256K1_N_C_2);
+    r->d[2] = secp256k1_u128_to_u64(&t); secp256k1_u128_rshift(&t, 64);
+    secp256k1_u128_accum_u64(&t, r->d[3]);
+    r->d[3] = secp256k1_u128_to_u64(&t);
+    return overflow;
 }
 static void secp256k1_scalar_set_b32(secp256k1_scalar *r, const uchar *b32, int *overflow) {
     int over;
     r->d[0] = (ulong)b32[31]
-		| (ulong)b32[30] << 8
-		| (ulong)b32[29] << 16
-		| (ulong)b32[28] << 24
-		| (ulong)b32[27] << 32
-		| (ulong)b32[26] << 40
-		| (ulong)b32[25] << 48
-		| (ulong)b32[24] << 56;
+        | (ulong)b32[30] << 8
+        | (ulong)b32[29] << 16
+        | (ulong)b32[28] << 24
+        | (ulong)b32[27] << 32
+        | (ulong)b32[26] << 40
+        | (ulong)b32[25] << 48
+        | (ulong)b32[24] << 56;
 
     r->d[1] = (ulong)b32[23]
-		| (ulong)b32[22] << 8
-		| (ulong)b32[21] << 16
-		| (ulong)b32[20] << 24
-		| (ulong)b32[19] << 32
-		| (ulong)b32[18] << 40
-		| (ulong)b32[17] << 48
-		| (ulong)b32[16] << 56;
+        | (ulong)b32[22] << 8
+        | (ulong)b32[21] << 16
+        | (ulong)b32[20] << 24
+        | (ulong)b32[19] << 32
+        | (ulong)b32[18] << 40
+        | (ulong)b32[17] << 48
+        | (ulong)b32[16] << 56;
 
     r->d[2] = (ulong)b32[15]
-		| (ulong)b32[14] << 8
-		| (ulong)b32[13] << 16
-		| (ulong)b32[12] << 24
-		| (ulong)b32[11] << 32
-		| (ulong)b32[10] << 40
-		| (ulong)b32[9] << 48
-		| (ulong)b32[8] << 56;
+        | (ulong)b32[14] << 8
+        | (ulong)b32[13] << 16
+        | (ulong)b32[12] << 24
+        | (ulong)b32[11] << 32
+        | (ulong)b32[10] << 40
+        | (ulong)b32[9] << 48
+        | (ulong)b32[8] << 56;
 
     r->d[3] = (ulong)b32[7]
-		| (ulong)b32[6] << 8
-		| (ulong)b32[5] << 16
-		| (ulong)b32[4] << 24
-		| (ulong)b32[3] << 32
-		| (ulong)b32[2] << 40
-		| (ulong)b32[1] << 48
-		| (ulong)b32[0] << 56;
+        | (ulong)b32[6] << 8
+        | (ulong)b32[5] << 16
+        | (ulong)b32[4] << 24
+        | (ulong)b32[3] << 32
+        | (ulong)b32[2] << 40
+        | (ulong)b32[1] << 48
+        | (ulong)b32[0] << 56;
 
     over = secp256k1_scalar_reduce(r, secp256k1_scalar_check_overflow(r));
 
@@ -1447,16 +1382,16 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     muladd_fast(n0, SECP256K1_N_C_0, &c0, &c1);
     extract_fast(&m0, &c0, &c1);
     sumadd_fast(l[1], &c0, &c1);
-	muladd_ulong(n1, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n1, SECP256K1_N_C_0, &c0, &c1, &c2);
     muladd_ulong(n0, SECP256K1_N_C_1, &c0, &c1, &c2);
     extract_ulong(&m1, &c0, &c1, &c2);
     sumadd(l[2], &c0, &c1, &c2);
-	muladd_ulong(n2, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n2, SECP256K1_N_C_0, &c0, &c1, &c2);
     muladd_ulong(n1, SECP256K1_N_C_1, &c0, &c1, &c2);
     sumadd(n0, &c0, &c1, &c2);
     extract_ulong(&m2, &c0, &c1, &c2);
     sumadd(l[3], &c0, &c1, &c2);
-	muladd_ulong(n3, SECP256K1_N_C_0, &c0, &c1, &c2);
+    muladd_ulong(n3, SECP256K1_N_C_0, &c0, &c1, &c2);
     muladd_ulong(n2, SECP256K1_N_C_1, &c0, &c1, &c2);
     sumadd(n1, &c0, &c1, &c2);
     extract_ulong(&m3, &c0, &c1, &c2);
@@ -1479,7 +1414,7 @@ static void secp256k1_scalar_reduce_512(secp256k1_scalar *r, const ulong *l) {
     sumadd(m2, &c0, &c1, &c2);
     muladd_ulong(m6, SECP256K1_N_C_0, &c0, &c1, &c2);
     muladd_ulong(m5, SECP256K1_N_C_1, &c0, &c1, &c2);
-	sumadd(m4, &c0, &c1, &c2);
+    sumadd(m4, &c0, &c1, &c2);
     extract_ulong(&p2, &c0, &c1, &c2);
     sumadd_fast(m3, &c0, &c1);
     muladd_fast(m6, SECP256K1_N_C_1, &c0, &c1);
@@ -1616,59 +1551,61 @@ static void secp256k1_scalar_split_lambda(secp256k1_scalar *r1, secp256k1_scalar
     secp256k1_scalar_add(r1, r1, k);
 }
 
-// memcpy reimplementations for opencl structures
+/** OpenCL memory functions (replace memcpy) */
 static void memcpy_to_secp256k1_scalar(secp256k1_scalar *r, const uchar *src, uint size) {
-	uint i8 = 0;
-	for (uint i = 0; i < size; i += 8) {
-		r->d[i8++] = ((ulong)src[i]) << 56
-			| ((ulong)src[i + 1]) << 48
-			| ((ulong)src[i + 2]) << 40
-			| ((ulong)src[i + 3]) << 32
-			| ((ulong)src[i + 4]) << 24
-			| ((ulong)src[i + 5]) << 16
-			| ((ulong)src[i + 6]) << 8
-			| ((ulong)src[i + 7]);
-	}
+    uint i8 = 0;
+    for (uint i = 0; i < size; i += 8) {
+        r->d[i8++] = ((ulong)src[i]) << 56
+            | ((ulong)src[i + 1]) << 48
+            | ((ulong)src[i + 2]) << 40
+            | ((ulong)src[i + 3]) << 32
+            | ((ulong)src[i + 4]) << 24
+            | ((ulong)src[i + 5]) << 16
+            | ((ulong)src[i + 6]) << 8
+            | ((ulong)src[i + 7]);
+    }
 }
 static void memcpy_to_secp256k1_ge_storage(secp256k1_ge_storage *s, const uchar *src, uint size) {
-	uint i8 = 0;
-	for (uint i = 0; i < size; i += 8) {
-		s->x.n[i8] = ((ulong)src[i]) << 56
-			| ((ulong)src[i + 1]) << 48
-			| ((ulong)src[i + 2]) << 40
-			| ((ulong)src[i + 3]) << 32
-			| ((ulong)src[i + 4]) << 24
-			| ((ulong)src[i + 5]) << 16
-			| ((ulong)src[i + 6]) << 8
-			| ((ulong)src[i + 7]);
-		s->y.n[i8] = ((ulong)src[i + 32]) << 56
-			| ((ulong)src[i + 33]) << 48
-			| ((ulong)src[i + 34]) << 40
-			| ((ulong)src[i + 35]) << 32
-			| ((ulong)src[i + 36]) << 24
-			| ((ulong)src[i + 37]) << 16
-			| ((ulong)src[i + 38]) << 8
-			| ((ulong)src[i + 39]);
-		i8++;
-	}
+    uint i8 = 0;
+    for (uint i = 0; i < size; i += 8) {
+        s->x.n[i8] = ((ulong)src[i]) << 56
+            | ((ulong)src[i + 1]) << 48
+            | ((ulong)src[i + 2]) << 40
+            | ((ulong)src[i + 3]) << 32
+            | ((ulong)src[i + 4]) << 24
+            | ((ulong)src[i + 5]) << 16
+            | ((ulong)src[i + 6]) << 8
+            | ((ulong)src[i + 7]);
+        s->y.n[i8] = ((ulong)src[i + 32]) << 56
+            | ((ulong)src[i + 33]) << 48
+            | ((ulong)src[i + 34]) << 40
+            | ((ulong)src[i + 35]) << 32
+            | ((ulong)src[i + 36]) << 24
+            | ((ulong)src[i + 37]) << 16
+            | ((ulong)src[i + 38]) << 8
+            | ((ulong)src[i + 39]);
+        i8++;
+    }
 }
 static void memcpy_to_message(uchar* s, __global uchar* src, uint offset) {
-	for (uint i = 0; i < 32; i++) {
-		s[i] = src[offset + i];
-	}
+    for (uint i = 0; i < 32; i++) {
+        s[i] = src[offset + i];
+    }
 }
 
+/** Public Key and Signature functions */
 typedef struct { uchar data[64]; } secp256k1_pubkey;
 typedef struct { uchar data[64]; } secp256k1_ecdsa_signature;
+
 static void secp256k1_pubkey_create(secp256k1_pubkey *r, __global uchar* pub, uint offset) {
-	for (uint i = 0; i < 64; i++) {
-		r->data[i] = pub[offset + i];
-	}
+    for (uint i = 0; i < 64; i++) {
+        r->data[i] = pub[offset + i];
+    }
 }
 static void secp256k1_ecdsa_signature_create(secp256k1_ecdsa_signature *r, __global uchar* sig, uint offset) {
-	for (uint i = 0; i < 64; i++) {
-		r->data[i] = sig[offset + i];
-	}
+    for (uint i = 0; i < 64; i++) {
+        r->data[i] = sig[offset + i];
+    }
 }
 static void secp256k1_ecdsa_signature_load(secp256k1_scalar* r, secp256k1_scalar* s, const secp256k1_ecdsa_signature* sig) {
     if (sizeof(secp256k1_scalar) == 32) {
@@ -1700,6 +1637,8 @@ static int secp256k1_pubkey_load(secp256k1_ge* ge, const secp256k1_pubkey* pubke
     return 1;
 }
 
+
+/** WNAF notation */
 struct secp256k1_strauss_point_state {
     int wnaf_na_1[129];
     int wnaf_na_lam[129];
@@ -1721,9 +1660,9 @@ static int secp256k1_ecmult_wnaf(int *wnaf, int len, const secp256k1_scalar *a, 
     int carry = 0;
 
     //memset(wnaf, 0, len * sizeof(wnaf[0]));
-	for (int i = 0; i < len; i += 1) {
-		wnaf[i] = 0;
-	}
+    for (int i = 0; i < len; i += 1) {
+        wnaf[i] = 0;
+    }
 
     s = *a;
     if (secp256k1_scalar_get_bits(&s, 255, 1)) {
@@ -1890,7 +1829,7 @@ static void secp256k1_ecmult_strauss_wnaf(const struct secp256k1_strauss_state *
 
     for (np = 0; np < no; ++np) {
         for (i = 0; i < ECMULT_TABLE_SIZE(WINDOW_A); i++) {
-            secp256k1_fe_mul_const(&state->aux[np * ECMULT_TABLE_SIZE(WINDOW_A) + i], &state->pre_a[np * ECMULT_TABLE_SIZE(WINDOW_A) + i].x, &const_beta);
+            secp256k1_fe_mul_const(&state->aux[np * ECMULT_TABLE_SIZE(WINDOW_A) + i], &state->pre_a[np * ECMULT_TABLE_SIZE(WINDOW_A) + i].x, &const_b);
         }
     }
 
@@ -1993,11 +1932,11 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp25
         /* xr * pr.z^2 mod p == pr.x, so the signature is valid. */
         return 1;
     }
-    if (secp256k1_fe_cmp_var_const(&xr, &secp256k1_ecdsa_const_p_minus_order) >= 0) {
+    if (secp256k1_fe_cmp_var_const(&xr, &const_p) >= 0) {
         /* xr + n >= p, so we can skip testing the second case. */
         return 0;
     }
-    secp256k1_fe_add_const(&xr, &secp256k1_ecdsa_const_order_as_fe);
+    secp256k1_fe_add_const(&xr, &const_n);
     if (secp256k1_gej_eq_x_var(&xr, &pr)) {
         /* (xr + n) * pr.z^2 mod p == pr.x, so the signature is valid. */
         return 1;
@@ -2019,17 +1958,18 @@ static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const uc
 
 
 __kernel void run_secp256k1_ecdsa_verify(__global uchar* signatures, __global uchar* public_keys, __global uchar* messages, __global uint* results) {
-	uint i = get_global_id(0);
-	uint i64 = i * 64;
-	uint i32 = i * 32;
+    uint i = get_global_id(0);
 
-	secp256k1_pubkey pubkey;
-	secp256k1_ecdsa_signature sig;
-	uchar message[32];
+    uint i64 = i * 64;
+    uint i32 = i * 32;
 
-	memcpy_to_message(message, messages, i32);
-	secp256k1_pubkey_create(&pubkey, public_keys, i64);
-	secp256k1_ecdsa_signature_create(&sig, signatures, i64);
+    secp256k1_pubkey pubkey;
+    secp256k1_ecdsa_signature sig;
+    uchar message[32];
 
-	results[i] = secp256k1_ecdsa_verify(&sig, message, &pubkey);
+    memcpy_to_message(message, messages, i32);
+    secp256k1_pubkey_create(&pubkey, public_keys, i64);
+    secp256k1_ecdsa_signature_create(&sig, signatures, i64);
+
+    results[i] = secp256k1_ecdsa_verify(&sig, message, &pubkey);
 }

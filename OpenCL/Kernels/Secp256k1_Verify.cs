@@ -22,17 +22,15 @@ public class Secp256k1_Verify : KernelBase, IDisposable
 		_kernel = KernelLibrary.CreateKernel(command_queue, device, context, "run_secp256k1_ecdsa_verify");
 	}
 
-	// Input = ByteArray
-	// Output = ByteArray
-	// length = Number of pairs of 64bit values
-	// Returns OpenCL wait event (nint)
-	public nint Run(nint input, nint output, int length, nint[]? waitEvents = null)
+	public nint Run(nint messages, nint public_keys, nint signatures, nint results, int length, nint[]? waitEvents = null)
 	{
 		if (_kernel is null)
 			throw new Exception("Create the kernel before running");
 
-		_kernel.SetArg(input);
-		_kernel.SetArg(output);
+		_kernel.SetArg(messages);
+		_kernel.SetArg(public_keys);
+		_kernel.SetArg(signatures);
+		_kernel.SetArg(results);
 
 		GlobalWorkSize[0] = (nuint)length;
 

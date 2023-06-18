@@ -59,6 +59,9 @@ nint command_queue = OpenCLSharp.CreateCommandQueue(context, device);
 
 
 // Run our tests
-Secp256k1_Int128_Tests.RunTests(device, context, command_queue);
+//Secp256k1_Int128_Tests.RunTests(device, context, command_queue);
+
+Secp256k1_Test test = new Secp256k1_Test(device, context, command_queue);
+test.RunTests();
 
 Console.WriteLine("\n\nAll Done!");

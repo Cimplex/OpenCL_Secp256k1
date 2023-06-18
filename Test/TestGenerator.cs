@@ -7,7 +7,7 @@ public class TestGenerator
 {
 	private static Secp256k1 _secp256k1 = new Secp256k1();
 
-	public List<byte[]> PublicKeysList = new List<byte[]>();
+	public List<byte[]> PublicKeyList = new List<byte[]>();
 	public List<byte[]> MessageHashList = new List<byte[]>();
 	public List<byte[]> SignatureList = new List<byte[]>();
 
@@ -34,7 +34,7 @@ public class TestGenerator
 		if ( ! _secp256k1.Sign(signature, msgHash, keypair.PrivateKey)) Utilities.error("Could not create signature");
 		bool verified = _secp256k1.Verify(signature, msgHash, keypair.PublicKey);
 
-		PublicKeysList.Add(publicKey);
+		PublicKeyList.Add(publicKey);
 		MessageHashList.Add(msgHash);
 		SignatureList.Add(signature);
 	}

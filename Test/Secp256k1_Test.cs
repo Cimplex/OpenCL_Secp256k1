@@ -26,7 +26,7 @@ public class Secp256k1_Test
 		byte[] _messages = new byte[HASHES * 32];
 		byte[] _public_keys = new byte[HASHES * 64];
 		byte[] _signatures = new byte[HASHES * 64];
-		byte[] _results = new byte[HASHES];
+		byte[] _results = new byte[HASHES * 32];
 
 		// Copy test data to buffers
 		TestGenerator gen = new TestGenerator();
@@ -54,6 +54,11 @@ public class Secp256k1_Test
 
 		results.Read(_command_queue, ref _results);
 
-		Console.WriteLine("OpenCL Result: " + _results[0]);
+		Console.Write("OpenCL Result: ");
+
+		for (int i = 0; i < _results.Length - 1; i++)
+			Console.Write(_results[i].ToString("X2") + ", ");
+		Console.WriteLine(_results[_results.Length - 1].ToString("X2"));
+		
 	}
 };

@@ -37,5 +37,33 @@ public class TestGenerator
 		PublicKeyList.Add(publicKey);
 		MessageHashList.Add(msgHash);
 		SignatureList.Add(signature);
+
+
+		// DEBUG Output the results as 0xHH
+		Console.WriteLine("__________________________________________________________________________");
+		Console.WriteLine("Generated Results:");
+
+		Console.WriteLine();
+		Console.Write("Private Key: ");
+		for (int i = 0; i < privateKey.Length; i++)
+			Console.Write("0x" + privateKey[i].ToString("X2") + ", ");
+
+		Console.WriteLine();
+		Console.Write("\nPublic Key: ");
+		for (int i = 0; i < publicKey.Length; i++)
+			Console.Write("0x" + publicKey[i].ToString("X2") + ", ");
+
+		Console.WriteLine();
+		Console.Write("\nMessage Hash: ");
+		for (int i = 0; i < msgHash.Length; i++)
+			Console.Write("0x" + msgHash[i].ToString("X2") + ", ");
+
+		Console.WriteLine();
+		Console.Write("\nSignature: ");
+		for (int i = 0; i < signature.Length; i++)
+			Console.Write("0x" + signature[i].ToString("X2") + ", ");
+
+		Console.WriteLine();
+		Console.WriteLine("__________________________________________________________________________");
 	}
 }

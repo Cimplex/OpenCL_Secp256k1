@@ -1622,20 +1622,20 @@ static void secp256k1_ecdsa_signature_load(secp256k1_scalar* r, secp256k1_scalar
     }
 }
 static int secp256k1_pubkey_load(secp256k1_ge* ge, const secp256k1_pubkey* pubkey) {
-    if (sizeof(secp256k1_ge_storage) == 64) {
+    //if (sizeof(secp256k1_ge_storage) == 64) {
         /* When the secp256k1_ge_storage type is exactly 64 byte, use its
          * representation inside secp256k1_pubkey, as conversion is very fast.
          * Note that secp256k1_pubkey_save must use the same representation. */
-        secp256k1_ge_storage s;
-        memcpy_to_secp256k1_ge_storage(&s, &pubkey->data[0], sizeof(s));
-        secp256k1_ge_from_storage(ge, &s);
-    } else {
+    //    secp256k1_ge_storage s;
+    //    memcpy_to_secp256k1_ge_storage(&s, &pubkey->data[0], sizeof(s));
+    //    secp256k1_ge_from_storage(ge, &s);
+    //} else {
         /* Otherwise, fall back to 32-byte big endian for X and Y. */
         secp256k1_fe x, y;
         secp256k1_fe_set_b32_mod(&x, pubkey->data);
         secp256k1_fe_set_b32_mod(&y, pubkey->data + 32);
         secp256k1_ge_set_xy(ge, &x, &y);
-    }
+    //}
     return 1;
 }
 
@@ -1900,7 +1900,10 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp25
     secp256k1_gej pr;
 
     if (secp256k1_scalar_is_zero(sigr) || secp256k1_scalar_is_zero(sigs)) {
-        return 0;
+        // TODO: Remove
+		return 1;
+		
+		//return 0;
     }
 
     secp256k1_scalar_inverse_var(&sn, sigs);
@@ -1909,7 +1912,10 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp25
     secp256k1_gej_set_ge(&pubkeyj, pubkey);
     secp256k1_ecmult(&pr, &pubkeyj, &u2, &u1);
     if (secp256k1_gej_is_infinity(&pr)) {
-        return 0;
+        // TODO: Remove
+		return 2;
+		
+		//return 0;
     }
 
     secp256k1_scalar_get_b32(c, sigr);
@@ -1934,46 +1940,124 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_scalar *sigr, const secp25
      */
     if (secp256k1_gej_eq_x_var(&xr, &pr)) {
         /* xr * pr.z^2 mod p == pr.x, so the signature is valid. */
-        return 1;
+        // TODO: Remove
+		return 3;
+		
+		//return 1;
     }
+
+
+	// There is a problem here
     if (secp256k1_fe_cmp_var_const(&xr, &const_p) >= 0) {
         /* xr + n >= p, so we can skip testing the second case. */
-        return 0;
+        // TODO: Remove
+		return 4;
+		
+		//return 0;
     }
     secp256k1_fe_add_const(&xr, &const_n);
     if (secp256k1_gej_eq_x_var(&xr, &pr)) {
         /* (xr + n) * pr.z^2 mod p == pr.x, so the signature is valid. */
-        return 1;
+        // TODO: Remove
+		return 5;
+		
+		//return 1;
     }
-    return 0;
+    // TODO: Remove
+	return 6;
+	
+	//return 0;
 }
 
-static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const uchar *msghash32, const secp256k1_pubkey *pubkey) {
+
+/* Utility Functions to help test this */
+static long create_long_from_bytes(__global uchar* c, int i) {
+	long r = (long)c[i]; // no capes or loops
+	r |= (long)c[i + 1] << 8;
+	r |= (long)c[i + 2] << 16;
+	r |= (long)c[i + 3] << 24;
+	r |= (long)c[i + 4] << 32;
+	r |= (long)c[i + 5] << 40;
+	r |= (long)c[i + 6] << 48;
+	return r | (long)c[i + 7] << 56;
+}
+static void load_bytes_from_int126(const secp256k1_int128 *r, __global uchar* c, int i) {
+	long a = r->hi;
+	ulong b = r->lo;
+
+    c[i]     = (uchar)b;
+    c[i + 1] = (uchar)(b >> 8);
+    c[i + 2] = (uchar)(b >> 16);
+    c[i + 3] = (uchar)(b >> 24);
+    c[i + 4] = (uchar)(b >> 32);
+    c[i + 5] = (uchar)(b >> 40);
+    c[i + 6] = (uchar)(b >> 48);
+    c[i + 7] = (uchar)(b >> 56);
+
+	c[i + 8] = (uchar)a;
+    c[i + 9] = (uchar)(a >> 8);
+    c[i + 10] = (uchar)(a >> 16);
+    c[i + 11] = (uchar)(a >> 24);
+    c[i + 12] = (uchar)(a >> 32);
+    c[i + 13] = (uchar)(a >> 40);
+    c[i + 14] = (uchar)(a >> 48);
+    c[i + 15] = (uchar)(a >> 56);
+    
+	/*
+    c[i + 8]  = (uchar)a;
+    c[i + 9]  = (uchar)(a >> 8);
+    c[i + 10] = (uchar)(a >> 16);
+    c[i + 11] = (uchar)(a >> 24);
+    c[i + 12] = (uchar)(a >> 32);
+    c[i + 13] = (uchar)(a >> 40);
+    c[i + 14] = (uchar)(a >> 48);
+    c[i + 15] = (uchar)(a >> 56);
+	*/
+}
+static void write_long_bytes(__global uchar* c, long value, int offset) {
+	for (ulong i = 0; i < sizeof(long); i++) {
+		c[i + offset] = (uchar)((value >> (8 * i)) & 0xFF);
+	}
+}
+
+static int secp256k1_ecdsa_verify(const secp256k1_ecdsa_signature *sig, const uchar *msghash32, const secp256k1_pubkey *pubkey, __global uchar* results) {
     secp256k1_ge q;
     secp256k1_scalar r, s;
     secp256k1_scalar m;
 
     secp256k1_scalar_set_b32(&m, msghash32, 0);
     secp256k1_ecdsa_signature_load(&r, &s, sig);
-    return (!secp256k1_scalar_is_high(&s) &&
+
+	uchar isScalarLow = !secp256k1_scalar_is_high(&s);
+	uchar isPublicKeyLoaded = secp256k1_pubkey_load(&q, pubkey);
+	uchar isSigVerified = secp256k1_ecdsa_sig_verify(&r, &s, &q, &m);
+
+	//return isScalarLow && isPublicKeyLoaded && isSigVerified;
+	return isSigVerified;
+    /*return (!secp256k1_scalar_is_high(&s) &&
             secp256k1_pubkey_load(&q, pubkey) &&
             secp256k1_ecdsa_sig_verify(&r, &s, &q, &m));
+	*/
 }
 
 
 __kernel void run_secp256k1_ecdsa_verify(__global uchar* messages, __global uchar* public_keys, __global uchar* signatures, __global uchar* results) {
-    uint i = get_global_id(0);
+    uint offset = get_global_id(0);
 
-    uint i64 = i * 64;
-    uint i32 = i * 32;
+    uint offset_64 = offset * 64;
+    uint offset_32 = offset * 32;
 
     secp256k1_pubkey pubkey;
     secp256k1_ecdsa_signature sig;
     uchar message[32];
 
-    memcpy_to_message(message, messages, i32);
-    secp256k1_pubkey_create(&pubkey, public_keys, i64);
-    secp256k1_ecdsa_signature_create(&sig, signatures, i64);
+    memcpy_to_message(&message, messages, offset_32);
+	for (int i = 0; i < 32; i += 1) {
+		results[i] = message[i];
+	}
 
-    results[i] = secp256k1_ecdsa_verify(&sig, message, &pubkey);
+    secp256k1_pubkey_create(&pubkey, public_keys, offset_64);
+    secp256k1_ecdsa_signature_create(&sig, signatures, offset_64);
+
+    results[0] = secp256k1_ecdsa_verify(&sig, &message, &pubkey, results);
 }
